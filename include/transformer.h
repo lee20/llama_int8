@@ -6,10 +6,16 @@
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <immintrin.h>
 
 typedef std::vector<float> tensor1d;
 typedef std::vector<tensor1d> tensor2d;
 typedef std::vector<tensor2d> tensor3d;
+
+typedef std::vector<__m256i> tensor8b1d;
+typedef std::vector<tensor8b1d> tensor8b2d;
+typedef std::vector<tensor8b2d> tensor8b3d;
+
 #define LAYER_NUM 32
 
 struct TransformerWeights {
@@ -19,8 +25,11 @@ struct TransformerWeights {
     tensor2d rms_ffn_weight;  // [layer, dim]
     // weights for attention matmuls
     tensor3d wq;  // [layer, dim, dim]
+    
     tensor3d wk;  // [layer, dim, dim]
     tensor3d wv;  // [layer, dim, dim]
+
+    
     tensor3d wo;  // [layer, dim, dim]
     // weights for ffn
     tensor3d w1;  // [layer, hidden_dim, dim]
@@ -32,6 +41,10 @@ struct TransformerWeights {
     // freq_cis for RoPE relatively positional embeddings
     tensor2d freq_cis_image;  // [seq_len, (dim/n_heads)/2]
     tensor2d freq_cis_real;
+
+    tensor8b3d wq8;
+    tensor2d scale_q;
+    tensor1d delta_q; 
 };
 
 struct Config {

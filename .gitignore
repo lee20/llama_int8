@@ -13,3 +13,5 @@ model_weight
 *.swp
 *.tmp
 
+*test*
+

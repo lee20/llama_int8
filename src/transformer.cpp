@@ -25,7 +25,7 @@ void PrintTime(std::chrono::time_point<std::chrono::high_resolution_clock> start
 void ShowTensor2D(std::string variable_name, tensor2d mat){
     int print_length = (mat.size() < mat[0].size())?mat.size() : mat[0].size();
     std::cout<<"tensor[0][10:15] = {";
-    for(int i=10;i<15;i++){
+    for(int i=10;i<20;i++){
         std::cout<< mat[0][i] << ",";
     }
     std::cout << "}"<<std::endl;
@@ -133,9 +133,20 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
             __m256 vecA8 = _mm256_loadu_ps(&A[i][(j + 7) << 3]);
 
             sum = _mm256_fmadd_ps(vecA1, vecX[j], sum);           // 执行第一个块的乘加操作
+
+
+
             sum = _mm256_fmadd_ps(vecA2, vecX[j + 1], sum);       // 执行第二个块的乘加操作
             sum = _mm256_fmadd_ps(vecA3, vecX[j + 2], sum);
             sum = _mm256_fmadd_ps(vecA4, vecX[j + 3], sum);
+            if(i==0 && j == 0){
+                 _mm256_storeu_ps(result, sum);
+                // 累加 SIMD 的结果和尾部的部分结果
+                float ff = result[0] + result[1] + result[2] + result[3] +  result[4] + result[5] + result[6] + result[7];
+                printf("%f\n",ff);
+            
+            }
+
             sum = _mm256_fmadd_ps(vecA5, vecX[j + 4], sum);
             sum = _mm256_fmadd_ps(vecA6, vecX[j + 5], sum);
             sum = _mm256_fmadd_ps(vecA7, vecX[j + 6], sum);
@@ -164,17 +175,103 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
 }
 
 
+float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d &output){
+    assert(input.size() == input_scale.size());
+    tensor1d tempvector(4096,0);
+    std::vector<int8_t> temp0(4096,0);
+    float max_abs = 0;
+    
+    for(int i=0;i<input.size();i++){
+        //printf("input_scale = %f,%f\n",input[i] , input_scale[i]);
+        tempvector[i] = input[i] / input_scale[i];
+        if(abs(tempvector[i]) > max_abs){
+            max_abs = abs(tempvector[i]);
+        }
+    }
+    
+    float delta = max_abs/127.0;
+    
+    for(int i=0;i<input.size();i++){
+        temp0[i] = static_cast<int8_t>(tempvector[i]/delta);
+    }
+    
+    for(int i=0;i<input.size();i+=32){
+        output[i/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(temp0.data() + i));
+    }
+    return delta;
+
+}
+
+
+void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const TransformerWeights &weights, const tensor1d &x) {
+    // 量化X
+    tensor8b1d input8b(128,_mm256_setzero_si256());
+
+    float deltax = QuantizeX(x, weights.scale_q[layer_id],input8b);
+
+    float delatw = weights.delta_q[layer_id];
+
+    // 实现计算
+    for (int i = 0; i < 4096; ++i) {
+
+        __m256i result1 = _mm256_setzero_si256();
+        int q[8];
+        int sum2 = 0;
+        // 里面的数可以进一步循环展开
+        for(int j=0; j<128;j++){
+            __m256i w = weights.wq8[layer_id][i][j];
+            __m256i x = input8b[j];
+
+            __m256i x_low = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(x, 0));
+            __m256i x_high = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(x, 1));
+            __m256i w_low = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(w, 0));
+            __m256i w_high = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(w, 1));
+            auto val1 = _mm256_madd_epi16(x_low, w_low);
+            auto val2 = _mm256_madd_epi16(x_high, w_high);
+            
+            result1 = _mm256_add_epi32(result1, val1);
+            result1 = _mm256_add_epi32(result1, val2);
+
+            if(i == 0 && j == 0){
+                _mm256_store_si256((__m256i*)q, result1);
+                sum2 = q[0] + q[1] + q[2] + q[3] + q[4] + q[5] + q[6] + q[7];
+
+                results[i] = deltax*delatw*sum2;
+
+                printf("%d,%f\n",sum2,results[i]);
+            }
+
+        }
+        _mm256_store_si256((__m256i*)q, result1);
+        sum2 = q[0] + q[1] + q[2] + q[3] + q[4] + q[5] + q[6] + q[7];
+
+        results[i] = deltax*delatw*sum2;
+    }
+
+}
+
+
 
 
 // n*4096
 void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
-    omp_set_num_threads(30);
-    #pragma omp parallel for
+    // omp_set_num_threads(30);
+    // #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply(output[i],weight,input[i]);
     }
 }
 
+// n*4096
+void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const TransformerWeights & weights){
+    // omp_set_num_threads(30);
+    // #pragma omp parallel for
+    //std::cout<<"layer id"<<layerid<<std::endl;
+    for(int i=0;i<input.size();i++){
+        avx_matrix_vector_multiply8b(layerid,output[i],weights,input[i]);
+    }
+    //std::cout<<"end layer id"<<layerid<<std::endl;
+}
 
 
 void rmsnorm(tensor1d &output, const tensor1d &input, const tensor1d &weight) {
@@ -264,7 +361,9 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     for(int i=0;i<input.size();i++){
         rmsnorm(input_rms[i],input[i],weights.rms_att_weight[layer_id]);
     }
-    //ShowTensor2D("inputrms",input_rms);
+    if(layer_id == 27)
+        ShowTensor2D("inputrms",input_rms);
+
 
     tensor2d q(input.size(),tensor1d(input[0].size(),0));
     tensor2d k(input.size(),tensor1d(input[0].size(),0));
@@ -275,6 +374,16 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     
     //std::cout<<"attention matmul started"<<std::endl;
     MatMul(q, input_rms, weights.wq[layer_id]);
+    auto mm1 = std::chrono::high_resolution_clock::now();
+    ShowTensor2D("q",q);
+    MatMul8bit(layer_id, q, input_rms, weights);
+    auto mm2 = std::chrono::high_resolution_clock::now();
+    ShowTensor2D("q",q);
+
+    PrintTime(init,mm1,"matmul");
+    PrintTime(mm1,mm2,"matmul2");
+    exit(0);
+
     MatMul(k, input_rms, weights.wk[layer_id]);
     MatMul(v, input_rms, weights.wv[layer_id]);
     //std::cout<<"attention matmul finished"<<std::endl;
@@ -294,12 +403,6 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
         g_kcache[layer_id][start_pos + i] = k[i];
         g_vcache[layer_id][start_pos + i] = v[i];
     }
-
-
-
-    // for(int i=3;i<10;i++){
-    //     printf("%f,",g_kcache[layer_id][i][10*128+123]);
-    // }
 
     auto scores = MultiheadQKV(q,g_kcache[layer_id],g_vcache[layer_id],start_pos,end_pos);
     //ShowTensor2D("score1",scores[0]);

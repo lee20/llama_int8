@@ -1,9 +1,10 @@
-#include<string>
+#include <string>
 #include <fstream>
 #include <tokenizers_cpp.h>
 #include <iostream>
 #include <string>
 #include "transformer.h"
+#include "load8bit.h"
 #include <chrono>
 #include <random>
 #include <omp.h>
@@ -89,35 +90,6 @@ void InitConfig(Config &config){
     config.top_p = 0.9;
 }
 
-
-void ReadWeight2Vector2D(std::string filename, tensor2d &vec){
-    std::string path1 = "/home/liyanjun/llama/llama2/llama2chatweightfp32/" + filename;
-    std::ifstream file(path1, std::ios::binary);  // 以二进制模式打开文件
-    if (!file) {
-        throw std::runtime_error("Failed to open the file. filename: "+path1);
-    }
-    int rows = vec.size();
-    int cols = vec[0].size();
-    size_t numElements = rows * cols;
-    
-    // 创建一个临时 vector 用于存储从文件中读取的一维数据
-    std::vector<float> data(numElements);
-
-    // 读取文件中的数据到一维 vector 中
-    if (!file.read(reinterpret_cast<char*>(data.data()), numElements * sizeof(float))) {
-        throw std::runtime_error("Failed to read the data from the file.");
-    }
-
-    file.close();  // 关闭文件
-
-    // 将一维 vector 数据转成二维 vector
-    vec.resize(rows, std::vector<float>(cols));  // 调整 vec 的大小
-    for (size_t i = 0; i < rows; ++i) {
-        for (size_t j = 0; j < cols; ++j) {
-            vec[i][j] = data[i * cols + j];  // 将数据放入二维 vector 中
-        }
-    }
-}
 
 
 
@@ -206,13 +178,19 @@ int main(){
     // Tokenize and Embedding
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
+
+
+    load8bit(transformer_weights);
+    
+    auto w8b = std::chrono::high_resolution_clock::now();
+    PrintTime(end,w8b,"Load 8bit weight");
     
 
     // prefill
     start = std::chrono::high_resolution_clock::now();
     int next_token = Transformer(embedded, transformer_weights, llama2_config, 0, embedded.size());
     end = std::chrono::high_resolution_clock::now();
-    PrintTime(start,end,"Prefill");
+    PrintTime(start, end, "Prefill");
     
     // decode
     int start_pos = embedded.size();
