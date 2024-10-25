@@ -202,6 +202,12 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
     float delatw = weights.delta[layer_id];
 
 
+    tensor8b1d x_low(columns,_mm256_setzero_si256());
+    tensor8b1d x_high(columns,_mm256_setzero_si256());
+    for(int j=0; j<columns;j++){
+        x_low[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 0));
+        x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
+    }
     
 
     // 实现计算
@@ -211,19 +217,20 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         int q[8];
         int sum2 = 0;
         // 里面的数可以进一步循环展开
-        for(int j=0; j<columns;j++){
-            __m256i w = weights.weight8[layer_id][i][j];
-            __m256i x = input8b[j];
-
-            __m256i x_low = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(x, 0));
-            __m256i x_high = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(x, 1));
-            __m256i w_low = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(w, 0));
-            __m256i w_high = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(w, 1));
-            auto val1 = _mm256_madd_epi16(x_low, w_low);
-            auto val2 = _mm256_madd_epi16(x_high, w_high);
+        for(int j=0; j<columns;j+=2){
+            __m256i w_low1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 0));
+            __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
+            auto val1 = _mm256_madd_epi16(x_low[j], w_low1);
+            auto val2 = _mm256_madd_epi16(x_high[j], w_high1);
+            __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
+            __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
+            auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
+            auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
             
             result1 = _mm256_add_epi32(result1, val1);
             result1 = _mm256_add_epi32(result1, val2);
+            result1 = _mm256_add_epi32(result1, val3);
+            result1 = _mm256_add_epi32(result1, val4);
 
 
         }
@@ -439,12 +446,13 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
 
     auto last_mul = std::chrono::high_resolution_clock::now();
     
-        // PrintTime(start,init,"init");
-        // PrintTime(init,qkv,"qkv");
-        // PrintTime(qkv,multihead,"multihead");
-        // PrintTime(multihead,last_mul,"last_mul");
-        // PrintTime(start,last_mul,"attention");
-    
+    // if(input.size() == 1){
+    //     PrintTime(start,init,"init");
+    //     PrintTime(init,qkv,"qkv");
+    //     PrintTime(qkv,multihead,"multihead");
+    //     PrintTime(multihead,last_mul,"last_mul");
+    //     PrintTime(start,last_mul,"attention");
+    // }
     
     return out;
 }
@@ -497,13 +505,13 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     //ShowTensor2D("w2",out);
     auto start5 = std::chrono::high_resolution_clock::now();
     
-    //if(layer_id == 7 && input.size() == 1){
-        // PrintTime(start1,start2,"init");
-        // PrintTime(start2,start3,"w1w3");
-        // PrintTime(start3,start4,"silu");
-        // PrintTime(start4,start5,"wo");
-        // PrintTime(start1,start5,"ffn");
-    //}
+    // if(input.size() == 1){
+    //     PrintTime(start1,start2,"init");
+    //     PrintTime(start2,start3,"w1w3");
+    //     PrintTime(start3,start4,"silu");
+    //     PrintTime(start4,start5,"wo");
+    //     PrintTime(start1,start5,"ffn");
+    // }
     
     
     return out;

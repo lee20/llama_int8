@@ -1,6 +1,7 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <immintrin.h>
 #include "transformer.h"
 #include "load8bit.h"
 
@@ -89,6 +90,59 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
     return delta;
 }
 
+
+void SaveWeight1D(const std::string filename, const tensor1d &vec){
+    std::ofstream outFile(filename, std::ios::binary);
+    if (!outFile) {
+        std::cerr << "无法打开文件: " << filename << std::endl;
+        return;
+    }
+
+    // 获取向量的大小并写入文件
+    size_t size = vec.size();
+    outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // 写入浮点数数据
+    outFile.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(float));
+
+    outFile.close();
+    if (!outFile.good()) {
+        std::cerr << "写入文件时出错: " << filename << std::endl;
+    }
+}
+
+
+void SaveWeight2D8(const std::string filename, const tensor8b2d &vec){
+    std::ofstream outFile(filename, std::ios::binary);
+    if (!outFile) {
+        std::cerr << "无法打开文件: " << filename << std::endl;
+        return;
+    }
+
+    // 写入二维向量的行数和列数
+    size_t rows = vec.size();
+    outFile.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+    for (const auto& row : vec) {
+        size_t cols = row.size();
+        outFile.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+        
+        for (const auto& m256i_value : row) {
+            // 将每个 __m256i 转换为 int8_t 数组
+            alignas(32) int8_t temp[32];
+            _mm256_store_si256(reinterpret_cast<__m256i*>(temp), m256i_value);
+            
+            // 写入 int8_t 数组
+            outFile.write(reinterpret_cast<const char*>(temp), sizeof(temp));
+        }
+    }
+
+    outFile.close();
+    if (!outFile.good()) {
+        std::cerr << "写入文件时出错: " << filename << std::endl;
+    }
+
+}
+
 void change8bit(TransformerWeights &weights)
 {
     tensor3d wqtemp;
@@ -138,4 +192,30 @@ void change8bit(TransformerWeights &weights)
         ReadActInfo(i,actinfo2,"stat2");
         weights.w28.delta[i] = ChangeWeight(weights.w2[i],weights.w28.weight8[i],actinfo2,weights.w28.scale[i]);
     }
+
+    for (int i = 0; i < 32; i++)
+    {
+        SaveWeight1D("./model_weight/weight/scale.wq." + std::to_string(i) + ".bin",weights.wq8.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.wk." + std::to_string(i) + ".bin",weights.wk8.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.wv." + std::to_string(i) + ".bin",weights.wv8.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.wo." + std::to_string(i) + ".bin",weights.wo8.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.w1." + std::to_string(i) + ".bin",weights.w18.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.w2." + std::to_string(i) + ".bin",weights.w28.scale[i]);
+        SaveWeight1D("./model_weight/weight/scale.w3." + std::to_string(i) + ".bin",weights.w38.scale[i]);
+        SaveWeight2D8("./model_weight/weight/weight.wq." + std::to_string(i) + ".bin",weights.wq8.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.wk." + std::to_string(i) + ".bin",weights.wk8.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.wv." + std::to_string(i) + ".bin",weights.wv8.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.wo." + std::to_string(i) + ".bin",weights.wo8.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.w1." + std::to_string(i) + ".bin",weights.w18.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.w2." + std::to_string(i) + ".bin",weights.w28.weight8[i]);
+        SaveWeight2D8("./model_weight/weight/weight.w3." + std::to_string(i) + ".bin",weights.w38.weight8[i]);
+    }
+    SaveWeight1D("./model_weight/weight/delta.wq.bin",weights.wq8.delta);
+    SaveWeight1D("./model_weight/weight/delta.wk.bin",weights.wk8.delta);
+    SaveWeight1D("./model_weight/weight/delta.wv.bin",weights.wv8.delta);
+    SaveWeight1D("./model_weight/weight/delta.wo.bin",weights.wo8.delta);
+    SaveWeight1D("./model_weight/weight/delta.w1.bin",weights.w18.delta);
+    SaveWeight1D("./model_weight/weight/delta.w2.bin",weights.w28.delta);
+    SaveWeight1D("./model_weight/weight/delta.w3.bin",weights.w38.delta);
+
 }

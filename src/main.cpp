@@ -117,6 +117,29 @@ void ReadWeight2Vector1D(std::string filename, tensor1d &vec){
     }
 }
 
+void ReadWeight1D8(std::string filename, tensor1d &vec){
+
+    std::ifstream file(filename, std::ios::binary);  // 以二进制模式打开文件
+    if (!file) {
+        throw std::runtime_error("Failed to open the file. filename: "+filename);
+    }
+    int rows = vec.size();
+    size_t numElements = rows;
+    
+    // 创建一个临时 vector 用于存储从文件中读取的一维数据
+    std::vector<float> data(numElements);
+
+    // 读取文件中的数据到一维 vector 中
+    if (!file.read(reinterpret_cast<char*>(data.data()), numElements * sizeof(float))) {
+        throw std::runtime_error("Failed to read the data from the file : "+filename);
+    }
+
+    file.close();  // 关闭文件
+    for (size_t i = 0; i < rows; ++i) {
+        vec[i] = data[i];
+    }
+}
+
 void LoadWeight32(Config &config, TransformerWeights &weights){
 
     int head_size = config.dim / config.n_heads;
@@ -160,7 +183,40 @@ void LoadWeight32(Config &config, TransformerWeights &weights){
     }
 }
 
-void ReadWeight8bit
+void ReadWeight2D8(std::string filename, tensor8b2d &vec){
+    std::ifstream inFile(filename, std::ios::binary);
+    if (!inFile) {
+        std::cerr << "无法打开文件: " << filename << std::endl;
+        return;
+    }
+
+    int rows = vec.size();
+    int cols = vec[0].size();
+
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            // 创建一个 32 字节的缓冲区以读取数据
+            alignas(32) int8_t temp[32];
+            inFile.read(reinterpret_cast<char*>(temp), 32);
+            // 将缓冲区数据加载到 __m256i
+            vec[i][j] = _mm256_load_si256(reinterpret_cast<const __m256i*>(temp));
+        }
+    }
+
+    inFile.close();
+    if (!inFile.good()) {
+        std::cerr << "读取文件时出错: " << filename << std::endl;
+    }
+}
+void ReadWeight8bit(int layerid, std::string filename, Int8Weight &weight){
+    ReadWeight2D8("./model_weight/weight/weight."+filename+"."+std::to_string(layerid)+".bin", weight.weight8[layerid]);
+    ReadWeight1D8("./model_weight/weight/scale."+filename+"."+std::to_string(layerid)+".bin", weight.scale[layerid]);
+
+    tensor1d delta(32,0);
+    ReadWeight1D8("./model_weight/weight/delta."+filename+".bin", delta);
+    weight.delta[layerid] = delta[layerid];
+
+}
 
 
 void LoadWeight8(Config &config, TransformerWeights &weights){
@@ -189,17 +245,14 @@ void LoadWeight8(Config &config, TransformerWeights &weights){
     tensor1d(32,0).swap(weights.w28.delta);
 
     for(int i=0;i<config.n_layers;i++){
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit(i, "wq",weights.wq8);
+        ReadWeight8bit(i, "wk",weights.wk8);
+        ReadWeight8bit(i, "wv",weights.wv8);
+        ReadWeight8bit(i, "wo",weights.wo8);
+        ReadWeight8bit(i, "w1",weights.w18);
+        ReadWeight8bit(i, "w3",weights.w38);
+        ReadWeight8bit(i, "w2",weights.w28);
     }
-
-
-
 }
 
 
@@ -216,7 +269,8 @@ int main(){
     TransformerWeights transformer_weights;
     Config llama2_config;
     InitConfig(llama2_config);
-    LoadWeight(llama2_config, transformer_weights);
+    LoadWeight32(llama2_config, transformer_weights);
+    LoadWeight8(llama2_config, transformer_weights);
     auto end = std::chrono::high_resolution_clock::now();
     PrintTime(start,end,"Load weight");
     
@@ -224,13 +278,12 @@ int main(){
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
 
-    if(llama2_config.bit_length == 8)
-        load8bit(transformer_weights);
+    // if(llama2_config.bit_length == 32)
+    //     change8bit(transformer_weights);
     
     auto w8b = std::chrono::high_resolution_clock::now();
     PrintTime(end,w8b,"Load 8bit weight");
     
-
     // prefill
     start = std::chrono::high_resolution_clock::now();
     int next_token = Transformer(embedded, transformer_weights, llama2_config, 0, embedded.size());
