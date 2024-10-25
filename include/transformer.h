@@ -18,6 +18,12 @@ typedef std::vector<tensor8b2d> tensor8b3d;
 
 #define LAYER_NUM 32
 
+struct Int8Weight {
+    tensor8b3d weight8;
+    tensor2d scale;
+    tensor1d delta; 
+};
+
 struct TransformerWeights {
     tensor2d token_embedding_table;  // [vocab_size, dim]
     // weights for rmsnorms
@@ -41,18 +47,13 @@ struct TransformerWeights {
     tensor2d freq_cis_image;  // [seq_len, (dim/n_heads)/2]
     tensor2d freq_cis_real;
 
-    tensor8b3d wq8;
-    tensor2d scale_q;
-    tensor1d delta_q; 
-    tensor8b3d wk8;
-    tensor2d scale_k;
-    tensor1d delta_k; 
-    tensor8b3d wv8;
-    tensor2d scale_v;
-    tensor1d delta_v; 
-    tensor8b3d wo8;
-    tensor2d scale_o;
-    tensor1d delta_o;
+    Int8Weight wq8;
+    Int8Weight wk8;
+    Int8Weight wv8;
+    Int8Weight wo8;
+    Int8Weight w18;
+    Int8Weight w38;
+    Int8Weight w28;
 };
 
 struct Config {

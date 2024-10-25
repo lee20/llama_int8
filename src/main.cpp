@@ -117,46 +117,90 @@ void ReadWeight2Vector1D(std::string filename, tensor1d &vec){
     }
 }
 
-void LoadWeight(Config &config, TransformerWeights &weights){
+void LoadWeight32(Config &config, TransformerWeights &weights){
+
+    int head_size = config.dim / config.n_heads;
     tensor2d(config.vocab_size, tensor1d(config.dim)).swap(weights.token_embedding_table);
     tensor2d(config.n_layers, tensor1d(config.dim)).swap(weights.rms_att_weight);
     tensor2d(config.n_layers, tensor1d(config.dim)).swap(weights.rms_ffn_weight);
-    tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wq);
-    tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wk);
-    tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wv);
-    tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wo);
-    tensor3d(config.n_layers, tensor2d(config.hidden_dim, tensor1d(config.dim))).swap(weights.w1);
-    tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.hidden_dim))).swap(weights.w2);
-    tensor3d(config.n_layers, tensor2d(config.hidden_dim, tensor1d(config.dim))).swap(weights.w3);
-    
     tensor1d(config.dim).swap(weights.rms_final_weight);
-    int head_size = config.dim / config.n_heads;
     tensor2d(8192,tensor1d(head_size / 2)).swap(weights.freq_cis_image);
     tensor2d(8192,tensor1d(head_size / 2)).swap(weights.freq_cis_real);
     tensor2d(config.n_layers, tensor1d(config.dim)).swap(weights.rms_ffn_weight);
     tensor2d(config.vocab_size,tensor1d(config.dim)).swap(weights.wcls);
 
     for(int i=0;i<config.n_layers;i++){
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wk.weight",weights.wk[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wv.weight",weights.wv[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wo.weight",weights.wo[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w1.weight",weights.w1[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w2.weight",weights.w2[i]);
-        ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w3.weight",weights.w3[i]);
         ReadWeight2Vector1D("layers." + std::to_string(i)+".attention_norm.weight",weights.rms_att_weight[i]);
         ReadWeight2Vector1D("layers." + std::to_string(i)+".ffn_norm.weight",weights.rms_ffn_weight[i]);
     }
-
     ReadWeight2Vector2D("tok_embeddings.weight",weights.token_embedding_table);
     ReadWeight2Vector1D("norm.weight",weights.rms_final_weight);
     ReadWeight2Vector2D("output.weight",weights.wcls);
     ReadWeight2Vector2D("real.bin",weights.freq_cis_real);
     ReadWeight2Vector2D("imag.bin",weights.freq_cis_image);
 
+    if(config.bit_length == 32){
+        tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wq);
+        tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wk);
+        tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wv);
+        tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.dim))).swap(weights.wo);
+        tensor3d(config.n_layers, tensor2d(config.hidden_dim, tensor1d(config.dim))).swap(weights.w1);
+        tensor3d(config.n_layers, tensor2d(config.dim, tensor1d(config.hidden_dim))).swap(weights.w2);
+        tensor3d(config.n_layers, tensor2d(config.hidden_dim, tensor1d(config.dim))).swap(weights.w3);
 
+        for(int i=0;i<config.n_layers;i++){
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wk.weight",weights.wk[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wv.weight",weights.wv[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".attention.wo.weight",weights.wo[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w1.weight",weights.w1[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w2.weight",weights.w2[i]);
+            ReadWeight2Vector2D("layers." + std::to_string(i)+".feed_forward.w3.weight",weights.w3[i]);
+        }
+    }
 }
 
+void ReadWeight8bit
+
+
+void LoadWeight8(Config &config, TransformerWeights &weights){
+    if(config.bit_length == 32) return;
+    
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wq8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wk8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wv8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wo8.weight8);
+    tensor8b3d(32,tensor8b2d(11008,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w18.weight8);
+    tensor8b3d(32,tensor8b2d(11008,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w38.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(344,_mm256_setzero_si256()))).swap(weights.w28.weight8);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wq8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wk8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wv8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wo8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.w18.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.w38.scale);
+    tensor2d(32,tensor1d(11008,0)).swap(weights.w28.scale);
+    tensor1d(32,0).swap(weights.wq8.delta);
+    tensor1d(32,0).swap(weights.wk8.delta);
+    tensor1d(32,0).swap(weights.wv8.delta);
+    tensor1d(32,0).swap(weights.wo8.delta);
+    tensor1d(32,0).swap(weights.w18.delta);
+    tensor1d(32,0).swap(weights.w38.delta);
+    tensor1d(32,0).swap(weights.w28.delta);
+
+    for(int i=0;i<config.n_layers;i++){
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+        ReadWeight8bit("layers." + std::to_string(i)+".attention.wq.weight",weights.wq[i]);
+    }
+
+
+
+}
 
 
 
@@ -180,8 +224,8 @@ int main(){
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
 
-
-    load8bit(transformer_weights);
+    if(llama2_config.bit_length == 8)
+        load8bit(transformer_weights);
     
     auto w8b = std::chrono::high_resolution_clock::now();
     PrintTime(end,w8b,"Load 8bit weight");

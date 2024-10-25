@@ -37,8 +37,8 @@ void ReadWeight2Vector2D(std::string filename, tensor2d &vec){
 
 
 
-void ReadActInfo(int index, tensor1d &vec){
-    std::ifstream file("model_weight/bin/statx" + std::to_string(index) + ".bin", std::ios::binary); // 以二进制模式打开文件
+void ReadActInfo(int index, tensor1d &vec, std::string name){
+    std::ifstream file("model_weight/bin/" + name + std::to_string(index) + ".bin", std::ios::binary); // 以二进制模式打开文件
     size_t numElements = vec.size();
 
     // 读取文件中的数据到一维 vector 中
@@ -54,7 +54,8 @@ void ReadActInfo(int index, tensor1d &vec){
 float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, tensor1d &s_coef)
 {
     float alpha = 0.5;
-    std::vector<float> column_max(4096,0);
+    int column_len = act.size();
+    std::vector<float> column_max(column_len,0);
     float quant_max = 0;
     float delta = 0;
 
@@ -65,11 +66,10 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
         }
     }
     // 除出系数
-    for(int i=0;i<4096;i++){
+    for(int i=0;i<column_len;i++){
         s_coef[i] = pow(act[i] , alpha) / pow(column_max[i] , 1-alpha);
     }
     // 量化权重
-    
     for(int i=0;i<weight.size();i++){
         for(int j=0;j<weight[0].size();j++){
             quant_max = (quant_max > abs(weight[i][j]* s_coef[j]))? quant_max : weight[i][j]* s_coef[j];
@@ -77,7 +77,7 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
     }
     // 保存量化的权重和scale
     delta = quant_max / 127.0;
-    std::vector<int8_t> temp_weight(4096,0);
+    std::vector<int8_t> temp_weight(column_len,0);
     for(int i=0;i<weight.size();i++){
         for(int j=0;j<weight[0].size();j++){
             temp_weight[j] = static_cast<int8_t>(weight[i][j]* s_coef[j]/delta);
@@ -86,54 +86,56 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
             weight8[i][j/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&temp_weight[j]));
         }
     }
-
-    // for(int i=0;i<4;i++){
-    //     std::cout<<delta << 
-    // }
-
-
     return delta;
-
-    //t1 = torch.load("statx.pt").detach().cpu().type(torch.float)
-    // weight = torch.load("weight.pt").detach().cpu().type(torch.float)
-    // random_tensor = torch.rand(4096)
-    // x = random_tensor * 2 - 1
-    // max_values = torch.max(torch.abs(weight), dim=0)[0]
-    // s = torch.pow(t1,alpha) / torch.pow(max_values,1-alpha)
-    // input_equ = x * s
-    // weight_equ = weight/s
-    // deltaq, weightq = quantint8(weight_equ)
-    // deltax, xqq = quantint8(input_equ)
 }
 
-void load8bit(TransformerWeights &weights)
+void change8bit(TransformerWeights &weights)
 {
     tensor3d wqtemp;
     tensor3d(32, tensor2d(4096, tensor1d(4096))).swap(wqtemp);
     
-    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wq8);
-    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wk8);
-    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wv8);
-    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w8);
-    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_q);
-    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_k);
-    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_v);
-    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_o);
-    tensor1d(32,0).swap(weights.delta_q);
-    tensor1d(32,0).swap(weights.delta_k);
-    tensor1d(32,0).swap(weights.delta_v);
-    tensor1d(32,0).swap(weights.delta_o);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wq8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wk8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wv8.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wo8.weight8);
+    tensor8b3d(32,tensor8b2d(11008,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w18.weight8);
+    tensor8b3d(32,tensor8b2d(11008,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w38.weight8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(344,_mm256_setzero_si256()))).swap(weights.w28.weight8);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wq8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wk8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wv8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.wo8.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.w18.scale);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.w38.scale);
+    tensor2d(32,tensor1d(11008,0)).swap(weights.w28.scale);
+    tensor1d(32,0).swap(weights.wq8.delta);
+    tensor1d(32,0).swap(weights.wk8.delta);
+    tensor1d(32,0).swap(weights.wv8.delta);
+    tensor1d(32,0).swap(weights.wo8.delta);
+    tensor1d(32,0).swap(weights.w18.delta);
+    tensor1d(32,0).swap(weights.w38.delta);
+    tensor1d(32,0).swap(weights.w28.delta);
 
 
     std::vector<float> actinfo(4096,0);
-    
+    std::vector<float> actinfo2(11008,0);
+
     
     for (int i = 0; i < 32; i++)
     {
-        ReadActInfo(i,actinfo);  
-        weights.delta_q[i] = ChangeWeight(weights.wq[i],weights.wq8[i],actinfo,weights.scale_q[i]);
-        weights.delta_k[i] = ChangeWeight(weights.wk[i],weights.wk8[i],actinfo,weights.scale_k[i]);
-        weights.delta_v[i] = ChangeWeight(weights.wv[i],weights.wv8[i],actinfo,weights.scale_v[i]);
-        
+        ReadActInfo(i,actinfo,"statx");  
+        weights.wq8.delta[i] = ChangeWeight(weights.wq[i],weights.wq8.weight8[i],actinfo,weights.wq8.scale[i]);
+        weights.wk8.delta[i] = ChangeWeight(weights.wk[i],weights.wk8.weight8[i],actinfo,weights.wk8.scale[i]);
+        weights.wv8.delta[i] = ChangeWeight(weights.wv[i],weights.wv8.weight8[i],actinfo,weights.wv8.scale[i]);
+
+        ReadActInfo(i,actinfo,"stato");
+        weights.wo8.delta[i] = ChangeWeight(weights.wo[i],weights.wo8.weight8[i],actinfo,weights.wo8.scale[i]);
+
+        ReadActInfo(i,actinfo,"stat1");
+        weights.w18.delta[i] = ChangeWeight(weights.w1[i],weights.w18.weight8[i],actinfo,weights.w18.scale[i]);
+        weights.w38.delta[i] = ChangeWeight(weights.w3[i],weights.w38.weight8[i],actinfo,weights.w38.scale[i]);
+
+        ReadActInfo(i,actinfo2,"stat2");
+        weights.w28.delta[i] = ChangeWeight(weights.w2[i],weights.w28.weight8[i],actinfo2,weights.w28.scale[i]);
     }
 }

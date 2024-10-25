@@ -110,10 +110,6 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
     __m256 vecX[cols/8];
     float result[8];
 
-    // for(int i=0;i<5;i++){
-    //     printf("%f,%f,\n",x[i],A[0][i]);
-    // }
-
     for(int i=0;i<length;i++){
         vecX[i] = _mm256_loadu_ps(&x[i*8]);
     }
@@ -140,13 +136,6 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
             sum = _mm256_fmadd_ps(vecA2, vecX[j + 1], sum);       // 执行第二个块的乘加操作
             sum = _mm256_fmadd_ps(vecA3, vecX[j + 2], sum);
             sum = _mm256_fmadd_ps(vecA4, vecX[j + 3], sum);
-            // if(i==0 && j == 0){
-            //      _mm256_storeu_ps(result, sum);
-            //     // 累加 SIMD 的结果和尾部的部分结果
-            //     float ff = result[0] + result[1] + result[2] + result[3] +  result[4] + result[5] + result[6] + result[7];
-            //     printf("%f\n",ff);
-            
-            // }
 
             sum = _mm256_fmadd_ps(vecA5, vecX[j + 4], sum);
             sum = _mm256_fmadd_ps(vecA6, vecX[j + 5], sum);
@@ -178,12 +167,12 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
 
 float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d &output){
     assert(input.size() == input_scale.size());
-    tensor1d tempvector(4096,0);
-    std::vector<int8_t> temp0(4096,0);
+    int size_i = input.size();
+    tensor1d tempvector(size_i,0);
+    std::vector<int8_t> temp0(size_i,0);
     float max_abs = 0;
     
-    for(int i=0;i<input.size();i++){
-        //printf("input_scale = %f,%f\n",input[i] , input_scale[i]);
+    for(int i=0;i<size_i;i++){
         tempvector[i] = input[i] / input_scale[i];
         if(abs(tempvector[i]) > max_abs){
             max_abs = abs(tempvector[i]);
@@ -192,11 +181,11 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
     
     float delta = max_abs/127.0;
     
-    for(int i=0;i<input.size();i++){
+    for(int i=0;i<size_i;i++){
         temp0[i] = static_cast<int8_t>(tempvector[i]/delta);
     }
     
-    for(int i=0;i<input.size();i+=32){
+    for(int i=0;i<size_i;i+=32){
         output[i/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(temp0.data() + i));
     }
     return delta;
@@ -204,23 +193,26 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
 }
 
 
-void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const TransformerWeights &weights, const tensor1d &x) {
+void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Weight &weights, const tensor1d &x) {
     // 量化X
-    tensor8b1d input8b(128,_mm256_setzero_si256());
+    int columns = weights.weight8[0].size();
+    int rows = weights.weight8.size();
+    tensor8b1d input8b(columns,_mm256_setzero_si256());
+    float deltax = QuantizeX(x, weights.scale[layer_id],input8b);
+    float delatw = weights.delta[layer_id];
 
-    float deltax = QuantizeX(x, weights.scale_q[layer_id],input8b);
 
-    float delatw = weights.delta_q[layer_id];
+    
 
     // 实现计算
-    for (int i = 0; i < 4096; ++i) {
+    for (int i = 0; i < rows; ++i) {
 
         __m256i result1 = _mm256_setzero_si256();
         int q[8];
         int sum2 = 0;
         // 里面的数可以进一步循环展开
-        for(int j=0; j<128;j++){
-            __m256i w = weights.wq8[layer_id][i][j];
+        for(int j=0; j<columns;j++){
+            __m256i w = weights.weight8[layer_id][i][j];
             __m256i x = input8b[j];
 
             __m256i x_low = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(x, 0));
@@ -256,7 +248,7 @@ void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
 }
 
 // n*4096
-void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const TransformerWeights & weights){
+void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const Int8Weight & weights){
     omp_set_num_threads(30);
     #pragma omp parallel for
     for(int i=0;i<input.size();i++){
@@ -340,9 +332,9 @@ tensor3d MultiheadQKV(const tensor2d & q_tensor, const tensor2d & k_tensor, cons
 }
 
 
-tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights &weights, int start_pos, int end_pos){
+tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights &weights, Config configs, int start_pos, int end_pos){
     
-    int config_bit_length = 8;
+    int config_bit_length = configs.bit_length;
     auto start = std::chrono::high_resolution_clock::now();
     
     
@@ -370,9 +362,9 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
         MatMul(k, input_rms, weights.wk[layer_id]);
         MatMul(v, input_rms, weights.wv[layer_id]); 
     }else if(config_bit_length == 8){
-        MatMul8bit(layer_id, q, input_rms, weights);
-        MatMul8bit(layer_id, k, input_rms, weights);
-        MatMul8bit(layer_id, v, input_rms, weights);
+        MatMul8bit(layer_id, q, input_rms, weights.wq8);
+        MatMul8bit(layer_id, k, input_rms, weights.wk8);
+        MatMul8bit(layer_id, v, input_rms, weights.wv8);
     }
 
 
@@ -442,7 +434,7 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     if(config_bit_length == 32){
         MatMul(out, output1, weights.wo[layer_id]);
     }else if(config_bit_length == 8){
-        MatMul8bit(layer_id, out, output1, weights);
+        MatMul8bit(layer_id, out, output1, weights.wo8);
     }
 
     auto last_mul = std::chrono::high_resolution_clock::now();
@@ -457,9 +449,11 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     return out;
 }
 
-tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weights){
+tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weights, Config configs){
+    int config_bit_length = configs.bit_length;
+
     auto start1 = std::chrono::high_resolution_clock::now();
-    
+
     tensor2d input_rms(input);
     for(int i=0;i<input.size();i++){
         rmsnorm(input_rms[i],input[i],weights.rms_ffn_weight[layer_id]);
@@ -471,8 +465,17 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     tensor2d silu_result(input.size(),tensor1d(11008,0));
     tensor2d out(input.size(),tensor1d(input[0].size(),0));
     auto start2 = std::chrono::high_resolution_clock::now();
-    MatMul(w3_result, input_rms, weights.w3[layer_id]);
-    MatMul(w1_result, input_rms, weights.w1[layer_id]);
+    
+
+    if(config_bit_length == 32){
+        MatMul(w3_result, input_rms, weights.w3[layer_id]);
+        MatMul(w1_result, input_rms, weights.w1[layer_id]);
+    }else if(config_bit_length == 8){
+        MatMul8bit(layer_id, w3_result, input_rms, weights.w38);
+        MatMul8bit(layer_id, w1_result, input_rms, weights.w18);
+    }
+
+
     //ShowTensor2D("w3_result",w3_result);
     //ShowTensor2D("w1_result",w1_result);
     auto start3 = std::chrono::high_resolution_clock::now();
@@ -484,8 +487,13 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     
     auto result0 = w1_result * w3_result;
     auto start4 = std::chrono::high_resolution_clock::now();
-    //ShowTensor2D("result0",result0);
-    MatMul(out, result0, weights.w2[layer_id]);
+
+    if(config_bit_length == 32){
+        MatMul(out, result0, weights.w2[layer_id]);
+    }else if(config_bit_length == 8){
+        MatMul8bit(layer_id, out, result0, weights.w28);
+    }
+
     //ShowTensor2D("w2",out);
     auto start5 = std::chrono::high_resolution_clock::now();
     
@@ -501,10 +509,13 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     return out;
 }
 
-tensor2d TransformerBlock(int layer_id, tensor2d & input_token, const TransformerWeights &weights, int start, int end){
-    tensor2d output_token = input_token + Attention(layer_id,input_token,weights,start,end);
+tensor2d TransformerBlock(int layer_id, tensor2d & input_token, const TransformerWeights &weights, Config configs, int start, int end){
+
+    tensor2d output_token = input_token + Attention(layer_id,input_token,weights,configs,start,end);
     //FeedForward和start_end无关
-    output_token = output_token + Feedforward(layer_id,output_token,weights);
+
+    output_token = output_token + Feedforward(layer_id,output_token,weights,configs);
+
     return output_token;
 }
 
@@ -569,8 +580,10 @@ int Transformer(const tensor2d &input_token, const TransformerWeights &weights, 
     tensor2d h = input_token;
     tensor2d output_rms(h);
     tensor2d output_transformer(h.size(),tensor1d(weights.wcls.size(),0));
+
+    
     for(int i=0;i<LAYER_NUM;i++){
-        h = TransformerBlock(i,h,weights,start,end);
+        h = TransformerBlock(i,h,weights,configs,start,end);
     }
     
     for(int i=0;i<h.size();i++){
