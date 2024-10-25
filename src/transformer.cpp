@@ -24,7 +24,7 @@ void PrintTime(std::chrono::time_point<std::chrono::high_resolution_clock> start
 
 void ShowTensor2D(std::string variable_name, tensor2d mat){
     int print_length = (mat.size() < mat[0].size())?mat.size() : mat[0].size();
-    std::cout<<"tensor[0][10:15] = {";
+    std::cout<<variable_name<<" tensor[0][10:15] = {";
     for(int i=10;i<20;i++){
         std::cout<< mat[0][i] << ",";
     }
@@ -110,6 +110,10 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
     __m256 vecX[cols/8];
     float result[8];
 
+    // for(int i=0;i<5;i++){
+    //     printf("%f,%f,\n",x[i],A[0][i]);
+    // }
+
     for(int i=0;i<length;i++){
         vecX[i] = _mm256_loadu_ps(&x[i*8]);
     }
@@ -133,19 +137,16 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
             __m256 vecA8 = _mm256_loadu_ps(&A[i][(j + 7) << 3]);
 
             sum = _mm256_fmadd_ps(vecA1, vecX[j], sum);           // 执行第一个块的乘加操作
-
-
-
             sum = _mm256_fmadd_ps(vecA2, vecX[j + 1], sum);       // 执行第二个块的乘加操作
             sum = _mm256_fmadd_ps(vecA3, vecX[j + 2], sum);
             sum = _mm256_fmadd_ps(vecA4, vecX[j + 3], sum);
-            if(i==0 && j == 0){
-                 _mm256_storeu_ps(result, sum);
-                // 累加 SIMD 的结果和尾部的部分结果
-                float ff = result[0] + result[1] + result[2] + result[3] +  result[4] + result[5] + result[6] + result[7];
-                printf("%f\n",ff);
+            // if(i==0 && j == 0){
+            //      _mm256_storeu_ps(result, sum);
+            //     // 累加 SIMD 的结果和尾部的部分结果
+            //     float ff = result[0] + result[1] + result[2] + result[3] +  result[4] + result[5] + result[6] + result[7];
+            //     printf("%f\n",ff);
             
-            }
+            // }
 
             sum = _mm256_fmadd_ps(vecA5, vecX[j + 4], sum);
             sum = _mm256_fmadd_ps(vecA6, vecX[j + 5], sum);
@@ -232,14 +233,6 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Transfo
             result1 = _mm256_add_epi32(result1, val1);
             result1 = _mm256_add_epi32(result1, val2);
 
-            if(i == 0 && j == 0){
-                _mm256_store_si256((__m256i*)q, result1);
-                sum2 = q[0] + q[1] + q[2] + q[3] + q[4] + q[5] + q[6] + q[7];
-
-                results[i] = deltax*delatw*sum2;
-
-                printf("%d,%f\n",sum2,results[i]);
-            }
 
         }
         _mm256_store_si256((__m256i*)q, result1);
@@ -255,8 +248,8 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Transfo
 
 // n*4096
 void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
-    // omp_set_num_threads(30);
-    // #pragma omp parallel for
+    omp_set_num_threads(30);
+    #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply(output[i],weight,input[i]);
     }
@@ -264,13 +257,11 @@ void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
 
 // n*4096
 void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const TransformerWeights & weights){
-    // omp_set_num_threads(30);
-    // #pragma omp parallel for
-    //std::cout<<"layer id"<<layerid<<std::endl;
+    omp_set_num_threads(30);
+    #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply8b(layerid,output[i],weights,input[i]);
     }
-    //std::cout<<"end layer id"<<layerid<<std::endl;
 }
 
 
@@ -351,7 +342,7 @@ tensor3d MultiheadQKV(const tensor2d & q_tensor, const tensor2d & k_tensor, cons
 
 tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights &weights, int start_pos, int end_pos){
     
-
+    int config_bit_length = 8;
     auto start = std::chrono::high_resolution_clock::now();
     
     
@@ -361,8 +352,6 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     for(int i=0;i<input.size();i++){
         rmsnorm(input_rms[i],input[i],weights.rms_att_weight[layer_id]);
     }
-    if(layer_id == 27)
-        ShowTensor2D("inputrms",input_rms);
 
 
     tensor2d q(input.size(),tensor1d(input[0].size(),0));
@@ -373,19 +362,30 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     auto init = std::chrono::high_resolution_clock::now();
     
     //std::cout<<"attention matmul started"<<std::endl;
-    MatMul(q, input_rms, weights.wq[layer_id]);
+    //
     auto mm1 = std::chrono::high_resolution_clock::now();
-    ShowTensor2D("q",q);
-    MatMul8bit(layer_id, q, input_rms, weights);
+    //ShowTensor2D("q",q);
+    if (config_bit_length == 32){
+        MatMul(q, input_rms, weights.wq[layer_id]);
+        MatMul(k, input_rms, weights.wk[layer_id]);
+        MatMul(v, input_rms, weights.wv[layer_id]); 
+    }else if(config_bit_length == 8){
+        MatMul8bit(layer_id, q, input_rms, weights);
+        MatMul8bit(layer_id, k, input_rms, weights);
+        MatMul8bit(layer_id, v, input_rms, weights);
+    }
+
+
+
     auto mm2 = std::chrono::high_resolution_clock::now();
-    ShowTensor2D("q",q);
+    //ShowTensor2D("q",q);
 
-    PrintTime(init,mm1,"matmul");
-    PrintTime(mm1,mm2,"matmul2");
-    exit(0);
+    //PrintTime(init,mm1,"matmul");
+    //PrintTime(mm1,mm2,"matmul2");
+    //exit(0);
 
-    MatMul(k, input_rms, weights.wk[layer_id]);
-    MatMul(v, input_rms, weights.wv[layer_id]);
+    //
+    //
     //std::cout<<"attention matmul finished"<<std::endl;
     auto qkv = std::chrono::high_resolution_clock::now();
 
@@ -439,8 +439,11 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     auto output1_after = std::chrono::high_resolution_clock::now();
 
     //ShowTensor2D("o1",output1);
-
-    MatMul(out, output1, weights.wo[layer_id]);
+    if(config_bit_length == 32){
+        MatMul(out, output1, weights.wo[layer_id]);
+    }else if(config_bit_length == 8){
+        MatMul8bit(layer_id, out, output1, weights);
+    }
 
     auto last_mul = std::chrono::high_resolution_clock::now();
     

@@ -88,6 +88,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
+    config.bit_length = 8;
 }
 
 

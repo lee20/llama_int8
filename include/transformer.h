@@ -25,7 +25,6 @@ struct TransformerWeights {
     tensor2d rms_ffn_weight;  // [layer, dim]
     // weights for attention matmuls
     tensor3d wq;  // [layer, dim, dim]
-    
     tensor3d wk;  // [layer, dim, dim]
     tensor3d wv;  // [layer, dim, dim]
 
@@ -45,6 +44,15 @@ struct TransformerWeights {
     tensor8b3d wq8;
     tensor2d scale_q;
     tensor1d delta_q; 
+    tensor8b3d wk8;
+    tensor2d scale_k;
+    tensor1d delta_k; 
+    tensor8b3d wv8;
+    tensor2d scale_v;
+    tensor1d delta_v; 
+    tensor8b3d wo8;
+    tensor2d scale_o;
+    tensor1d delta_o;
 };
 
 struct Config {
@@ -57,6 +65,7 @@ struct Config {
     int seq_len; // max sequence length
     float temprature;
     float top_p;
+    int bit_length;
 };
 
 //tensor2d Attention(int layer_id, tensor2d input);

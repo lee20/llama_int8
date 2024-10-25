@@ -1,5 +1,6 @@
 #include <string>
 #include <fstream>
+#include <iostream>
 #include "transformer.h"
 #include "load8bit.h"
 
@@ -50,7 +51,7 @@ void ReadActInfo(int index, tensor1d &vec){
 
 }
 
-float ChangeWeight(tensor2d &src, tensor8b2d &dst, tensor1d &act, tensor1d &s_coef)
+float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, tensor1d &s_coef)
 {
     float alpha = 0.5;
     std::vector<float> column_max(4096,0);
@@ -58,9 +59,9 @@ float ChangeWeight(tensor2d &src, tensor8b2d &dst, tensor1d &act, tensor1d &s_co
     float delta = 0;
 
     // 求列最大
-    for(int i=0;i<src.size();i++){
-        for(int j=0;j<src[0].size();j++){
-            column_max[j] = (abs(src[i][j]) > column_max[j]) ? abs(src[i][j]) : column_max[j];
+    for(int i=0;i<weight.size();i++){
+        for(int j=0;j<weight[0].size();j++){
+            column_max[j] = (abs(weight[i][j]) > column_max[j]) ? abs(weight[i][j]) : column_max[j];
         }
     }
     // 除出系数
@@ -69,24 +70,26 @@ float ChangeWeight(tensor2d &src, tensor8b2d &dst, tensor1d &act, tensor1d &s_co
     }
     // 量化权重
     
-    for(int i=0;i<src.size();i++){
-        for(int j=0;j<src[0].size();j++){
-            src[i][j] = src[i][j] * s_coef[j];
-            
-            quant_max = (quant_max > abs(src[i][j]))? quant_max : src[i][j];
+    for(int i=0;i<weight.size();i++){
+        for(int j=0;j<weight[0].size();j++){
+            quant_max = (quant_max > abs(weight[i][j]* s_coef[j]))? quant_max : weight[i][j]* s_coef[j];
         }
     }
     // 保存量化的权重和scale
     delta = quant_max / 127.0;
     std::vector<int8_t> temp_weight(4096,0);
-    for(int i=0;i<src.size();i++){
-        for(int j=0;j<src[0].size();j++){
-            temp_weight[j] = static_cast<int8_t>(src[i][j]/delta);
+    for(int i=0;i<weight.size();i++){
+        for(int j=0;j<weight[0].size();j++){
+            temp_weight[j] = static_cast<int8_t>(weight[i][j]* s_coef[j]/delta);
         }
-        for(int j=0;j<src[0].size();j+=32){
-            dst[i][j/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&src[i][j]));
+        for(int j=0;j<weight[0].size();j+=32){
+            weight8[i][j/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&temp_weight[j]));
         }
     }
+
+    // for(int i=0;i<4;i++){
+    //     std::cout<<delta << 
+    // }
 
 
     return delta;
@@ -107,9 +110,19 @@ void load8bit(TransformerWeights &weights)
 {
     tensor3d wqtemp;
     tensor3d(32, tensor2d(4096, tensor1d(4096))).swap(wqtemp);
+    
     tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wq8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wk8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.wv8);
+    tensor8b3d(32,tensor8b2d(4096,tensor8b1d(128,_mm256_setzero_si256()))).swap(weights.w8);
     tensor2d(32,tensor1d(4096,0)).swap(weights.scale_q);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_k);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_v);
+    tensor2d(32,tensor1d(4096,0)).swap(weights.scale_o);
     tensor1d(32,0).swap(weights.delta_q);
+    tensor1d(32,0).swap(weights.delta_k);
+    tensor1d(32,0).swap(weights.delta_v);
+    tensor1d(32,0).swap(weights.delta_o);
 
 
     std::vector<float> actinfo(4096,0);
@@ -117,10 +130,10 @@ void load8bit(TransformerWeights &weights)
     
     for (int i = 0; i < 32; i++)
     {
-        ReadWeight2Vector2D("layers." + std::to_string(i) + ".attention.wq.weight", wqtemp[i]);
-        ReadActInfo(i,actinfo);
-
-        float delta_weight = ChangeWeight(weights.wq[i],weights.wq8[i],actinfo,weights.scale_q[i]);
-        weights.delta_q[i] = delta_weight;
+        ReadActInfo(i,actinfo);  
+        weights.delta_q[i] = ChangeWeight(weights.wq[i],weights.wq8[i],actinfo,weights.scale_q[i]);
+        weights.delta_k[i] = ChangeWeight(weights.wk[i],weights.wk8[i],actinfo,weights.scale_k[i]);
+        weights.delta_v[i] = ChangeWeight(weights.wv[i],weights.wv8[i],actinfo,weights.scale_v[i]);
+        
     }
 }
