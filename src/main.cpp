@@ -68,6 +68,16 @@ std::vector<int> TokenizerGenerator(std::string input_str){
 }
 
 
+
+
+std::string Detokenizer(std::vector<int> nums){
+    auto blob = LoadBytesFromFile("./model_weight/tokenizer.model");
+    auto tok = Tokenizer::FromBlobSentencePiece(blob);
+    std::string decoded_prompt = tok->Decode(nums);
+    return decoded_prompt;
+}
+
+
 tensor2d Embed(const std::vector<int> & ids, const tensor2d &embedding_dict){
     tensor2d result(0, tensor1d(embedding_dict[0].size(),0));
     for(auto id : ids){
@@ -88,7 +98,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 32;
+    config.bit_length = 8;
 }
 
 
@@ -292,6 +302,9 @@ int main(){
     int start_pos = embedded.size();
     std::vector<int> result;
     while(1){
+        auto result1 = Detokenizer(std::vector<int>(1,next_token));
+        std::cout<<result1<<std::endl;
+        
         result.push_back(next_token);
         
         tensor2d input_vec = Embed(std::vector<int>(1,next_token), transformer_weights.token_embedding_table);
@@ -300,8 +313,13 @@ int main(){
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         
-        PrintTime(start,end,"Decode"+std::to_string(next_token));
+        //PrintTime(start,end,"Decode"+std::to_string(next_token));
+        
+        
+        
     }
+
+
 
 
     return 0;

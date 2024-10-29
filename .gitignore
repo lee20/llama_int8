@@ -1,7 +1,6 @@
 # Ignore build directory
 build
 .vscode
-tokenizers-cpp
 model_weight
 
 # Ignore other common files
