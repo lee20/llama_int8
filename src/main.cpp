@@ -88,7 +88,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 8;
+    config.bit_length = 32;
 }
 
 
@@ -269,22 +269,20 @@ int main(){
     TransformerWeights transformer_weights;
     Config llama2_config;
     InitConfig(llama2_config);
+
     LoadWeight32(llama2_config, transformer_weights);
-    LoadWeight8(llama2_config, transformer_weights);
-    auto end = std::chrono::high_resolution_clock::now();
-    PrintTime(start,end,"Load weight");
     
-    // Tokenize and Embedding
+    LoadWeight8(llama2_config, transformer_weights);
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
-
-    // if(llama2_config.bit_length == 32)
+    // if(llama2_config.bit_length == 32) //这个表示初始量化
     //     change8bit(transformer_weights);
+    auto end = std::chrono::high_resolution_clock::now();
+    PrintTime(start,end,"Load 8bit weight");
+
+
     
-    auto w8b = std::chrono::high_resolution_clock::now();
-    PrintTime(end,w8b,"Load 8bit weight");
-    
-    // prefill
+    // prefill阶段
     start = std::chrono::high_resolution_clock::now();
     int next_token = Transformer(embedded, transformer_weights, llama2_config, 0, embedded.size());
     end = std::chrono::high_resolution_clock::now();
@@ -294,17 +292,15 @@ int main(){
     int start_pos = embedded.size();
     std::vector<int> result;
     while(1){
-        
-        std::cout<<next_token<<std::endl;
         result.push_back(next_token);
+        
         tensor2d input_vec = Embed(std::vector<int>(1,next_token), transformer_weights.token_embedding_table);
         start = std::chrono::high_resolution_clock::now();
         next_token = Transformer(input_vec,transformer_weights,llama2_config,start_pos,start_pos+1);
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         
-        
-        PrintTime(start,end,"Decode");
+        PrintTime(start,end,"Decode"+std::to_string(next_token));
     }
 
 

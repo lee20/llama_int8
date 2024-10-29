@@ -18,7 +18,7 @@ std::string filepath = "/home/liyanjun/llama/llama2/llama2chatweightfp32/";
 
 void PrintTime(std::chrono::time_point<std::chrono::high_resolution_clock> start,std::chrono::time_point<std::chrono::high_resolution_clock> end, std::string name){
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << name<< " cost " << duration.count() << " us" << std::endl;
+    std::cout << name << " cost " << duration.count() << " us" << std::endl;
 }
 
 
@@ -195,13 +195,15 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
 
 void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Weight &weights, const tensor1d &x) {
     // 量化X
+
+    // 这部分记录时间
     int columns = weights.weight8[0].size();
     int rows = weights.weight8.size();
     tensor8b1d input8b(columns,_mm256_setzero_si256());
     float deltax = QuantizeX(x, weights.scale[layer_id],input8b);
     float delatw = weights.delta[layer_id];
 
-
+    // 这部分也记录时间
     tensor8b1d x_low(columns,_mm256_setzero_si256());
     tensor8b1d x_high(columns,_mm256_setzero_si256());
     for(int j=0; j<columns;j++){
@@ -209,28 +211,50 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
     }
     
-
+    
     // 实现计算
+    omp_set_num_threads(8);
+    #pragma omp parallel for
     for (int i = 0; i < rows; ++i) {
 
         __m256i result1 = _mm256_setzero_si256();
         int q[8];
         int sum2 = 0;
         // 里面的数可以进一步循环展开
-        for(int j=0; j<columns;j+=2){
+        for(int j=0; j<columns;j+=4){
             __m256i w_low1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 0));
-            __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
             auto val1 = _mm256_madd_epi16(x_low[j], w_low1);
+            //result1 = _mm256_add_epi32(result1, val1);
+            __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
             auto val2 = _mm256_madd_epi16(x_high[j], w_high1);
+            //result1 = _mm256_add_epi32(result1, val2);
             __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
-            __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
             auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
+            //result1 = _mm256_add_epi32(result1, val3);
+            __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
             auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
+            //result1 = _mm256_add_epi32(result1, val4);
+            
+            __m256i w_low3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 0));
+            auto val5 = _mm256_madd_epi16(x_low[j+2], w_low3);
+            //result1 = _mm256_add_epi32(result1, val5);
+            __m256i w_high3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 1));
+            auto val6 = _mm256_madd_epi16(x_high[j+2], w_high3);
+            //result1 = _mm256_add_epi32(result1, val6);
+            __m256i w_low4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 0));
+            auto val7 = _mm256_madd_epi16(x_low[j+3], w_low4);
+            //result1 = _mm256_add_epi32(result1, val7);
+            __m256i w_high4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 1));
+            auto val8 = _mm256_madd_epi16(x_high[j+3], w_high4);
             
             result1 = _mm256_add_epi32(result1, val1);
             result1 = _mm256_add_epi32(result1, val2);
             result1 = _mm256_add_epi32(result1, val3);
             result1 = _mm256_add_epi32(result1, val4);
+            result1 = _mm256_add_epi32(result1, val5);
+            result1 = _mm256_add_epi32(result1, val6);
+            result1 = _mm256_add_epi32(result1, val7);
+            result1 = _mm256_add_epi32(result1, val8);
 
 
         }
@@ -256,8 +280,8 @@ void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
 
 // n*4096
 void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const Int8Weight & weights){
-    omp_set_num_threads(30);
-    #pragma omp parallel for
+    // omp_set_num_threads(8);
+    // #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply8b(layerid,output[i],weights,input[i]);
     }
@@ -314,22 +338,45 @@ void applyRoPE(int seq_id, tensor1d & input, const TransformerWeights & weights)
 tensor3d MultiheadQKV(const tensor2d & q_tensor, const tensor2d & k_tensor, const tensor2d &v_tensor, int startpos, int endpos){
     
     //注意这里用q_tensor而不是用start和end中间的数据是否合适?
-    int sizeq = q_tensor.size();
+    const int sizeq = q_tensor.size();
     tensor3d scores(32,tensor2d(sizeq,tensor1d(endpos,0)));
-    float mul_coef = 1/sqrt(128.0);
+    const float mul_coef = 1/sqrt(128.0);
 
     omp_set_num_threads(100);
     #pragma omp parallel for
     for(int i=0;i<32;i++){
         int ff = i*128;
+        // for(int j=0;j<sizeq;j++){
+        //     for(int k=0;k<endpos;k++){
+        //         float temp = 0;
+        //         for(int m=0;m<128;m++){
+        //             temp += q_tensor[j][ff+m]*k_tensor[k][ff+m];
+        //         }
+        //         scores[i][j][k] = temp*mul_coef;
+        //     }
+        // }
         for(int j=0;j<sizeq;j++){
-            for(int k=0;k<endpos;k++){
-                float temp = 0;
-                for(int m=0;m<128;m++){
-                    temp += q_tensor[j][ff+m]*k_tensor[k][ff+m];
-                }
-                scores[i][j][k] = temp*mul_coef;
+            __m256 vec_a[16];
+            for(int m=0;m<128;m+=8){
+                vec_a[m>>3] = _mm256_loadu_ps(&q_tensor[j][ff+m]);
             }
+            tensor1d temp_vec(endpos,0);
+            for(int k=0;k<endpos;k++){
+                float temps[8];
+                __m256 sum_vec = _mm256_setzero_ps();
+                for(int m=0;m<16;m+=1){
+                    
+                    __m256 vec_b = _mm256_loadu_ps(&k_tensor[k][ff+(m<<3)]);
+                    __m256 mul_vec = _mm256_mul_ps(vec_a[m], vec_b);
+                    sum_vec = _mm256_add_ps(sum_vec, mul_vec);
+                }
+                _mm256_storeu_ps(temps, sum_vec);
+
+                float result = temps[0] + temps[1] + temps[2] + temps[3] +
+                            temps[4] + temps[5] + temps[6] + temps[7];
+                temp_vec[k] = result*mul_coef;
+            }
+            scores[i][j] = temp_vec;
         }
     }
 
