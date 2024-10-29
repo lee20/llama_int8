@@ -302,9 +302,7 @@ int main(){
     int start_pos = embedded.size();
     std::vector<int> result;
     while(1){
-        auto result1 = Detokenizer(std::vector<int>(1,next_token));
-        std::cout<<result1<<std::endl;
-        
+        std::string result_str = Detokenizer(std::vector<int>(1,next_token));        
         result.push_back(next_token);
         
         tensor2d input_vec = Embed(std::vector<int>(1,next_token), transformer_weights.token_embedding_table);
@@ -313,10 +311,7 @@ int main(){
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         
-        //PrintTime(start,end,"Decode"+std::to_string(next_token));
-        
-        
-        
+        PrintTime(start,end,"Decode"+std::to_string(next_token));
     }
 
 
