@@ -98,7 +98,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 8;
+    config.bit_length = 32;
 }
 
 
@@ -118,7 +118,7 @@ void ReadWeight2Vector1D(std::string filename, tensor1d &vec){
 
     // 读取文件中的数据到一维 vector 中
     if (!file.read(reinterpret_cast<char*>(data.data()), numElements * sizeof(float))) {
-        throw std::runtime_error("Failed to read the data from the file : "+filename);
+        throw std::runtime_error("Failed to read the data from the file : " + filename);
     }
 
     file.close();  // 关闭文件
@@ -281,8 +281,12 @@ int main(){
     InitConfig(llama2_config);
 
     LoadWeight32(llama2_config, transformer_weights);
-    
-    LoadWeight8(llama2_config, transformer_weights);
+
+    // if(llama2_config.bit_length == 32)
+    //     change8bit(transformer_weights);
+    if(llama2_config.bit_length == 8){
+        LoadWeight8(llama2_config, transformer_weights);
+    }
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
     // if(llama2_config.bit_length == 32) //这个表示初始量化
@@ -296,14 +300,15 @@ int main(){
     start = std::chrono::high_resolution_clock::now();
     int next_token = Transformer(embedded, transformer_weights, llama2_config, 0, embedded.size());
     end = std::chrono::high_resolution_clock::now();
-    PrintTime(start, end, "Prefill");
+    PrintTime(start, end, "Prefill ");
     
     // decode
     int start_pos = embedded.size();
     std::vector<int> result;
     while(1){
-        std::string result_str = Detokenizer(std::vector<int>(1,next_token));        
+        
         result.push_back(next_token);
+        std::string result_str = Detokenizer(result);        
         
         tensor2d input_vec = Embed(std::vector<int>(1,next_token), transformer_weights.token_embedding_table);
         start = std::chrono::high_resolution_clock::now();
@@ -311,7 +316,8 @@ int main(){
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         
-        PrintTime(start,end,"Decode"+std::to_string(next_token));
+        //std::cout<<result_str<<std::endl;
+        PrintTime(start,end,"Decode "+std::to_string(next_token));
     }
 
 

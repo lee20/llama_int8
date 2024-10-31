@@ -24,9 +24,9 @@ void PrintTime(std::chrono::time_point<std::chrono::high_resolution_clock> start
 
 void ShowTensor2D(std::string variable_name, tensor2d mat){
     int print_length = (mat.size() < mat[0].size())?mat.size() : mat[0].size();
-    std::cout<<variable_name<<" tensor[0][10:15] = {";
-    for(int i=10;i<20;i++){
-        std::cout<< mat[0][i] << ",";
+    std::cout<<variable_name<<" tensor[0][0:20] = {";
+    for(int i=1000;i<1020;i++){
+        std::cout<< mat[15][i] << ",";
     }
     std::cout << "}"<<std::endl;
 }
@@ -103,7 +103,7 @@ tensor2d operator*(const tensor2d& mat1, const tensor2d& mat2) {
 
 
 void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tensor1d &x) {
-    int rows = A.size();
+    int rows = A.size(); 
     int cols = A[0].size();
     int length = cols/8;
     assert(cols%8 == 0); //8对齐是后面注释掉无法被8整除的那部分的前提
@@ -114,6 +114,14 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
         vecX[i] = _mm256_loadu_ps(&x[i*8]);
     }
 
+    // printf("w float value  =\n ");
+    // for(int i=0;i<64;i++){
+    //     printf("%d, %f,",i, A[0][i]);
+    // }
+    // printf("\n");
+    // exit(0);
+    omp_set_num_threads(30);
+    #pragma omp parallel for
 
     for (int i = 0; i < rows; ++i) {
         __m256 sum = _mm256_setzero_ps();  // 初始化累加器
@@ -173,6 +181,7 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
     float max_abs = 0;
     
     for(int i=0;i<size_i;i++){
+        //printf("input scale = %f,",input_scale[i]);
         tempvector[i] = input[i] / input_scale[i];
         if(abs(tempvector[i]) > max_abs){
             max_abs = abs(tempvector[i]);
@@ -188,6 +197,9 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
     for(int i=0;i<size_i;i+=32){
         output[i/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(temp0.data() + i));
     }
+
+    assert(delta > 0);
+    
     return delta;
 
 }
@@ -197,8 +209,10 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
     // 量化X
 
     // 这部分记录时间
-    int columns = weights.weight8[0].size();
-    int rows = weights.weight8.size();
+    int columns = weights.weight8[layer_id][0].size(); //128
+    int rows = weights.weight8[layer_id].size(); //4096
+
+    // printf("%d,%d\n",rows,columns);exit(0);
     tensor8b1d input8b(columns,_mm256_setzero_si256());
     float deltax = QuantizeX(x, weights.scale[layer_id],input8b);
     float delatw = weights.delta[layer_id];
@@ -210,10 +224,55 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         x_low[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 0));
         x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
     }
+
+    //--------------- 这是调试信息
+    // printf("deltax = %f, deltaw = %f\n x int8 value = ", deltax, delatw);
+    // int16_t arr[16];
+    // // 将 __m256i 中的数据存储到普通的 int16 数组中
+    // _mm256_storeu_si256((__m256i*)arr, x_low[0]);
+    // for(int i=0;i<16;i++){
+    //     printf("%d,",arr[i]);
+    // }
+    // printf("\n x scalex  = ");
+    // for(int i=0;i<64;i++){
+    //     printf("%d,%f,",i,weights.scale[layer_id][i]);
+    // }
+    // printf("\n x float value  = ");
+    // for(int i=16;i<32;i++){
+    //     printf("%f,",x[i]);
+    // }
+
+    // printf("\n w value  = ");
+    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][0], 0)));
+    // for(int i=0;i<16;i++){
+    //     printf("%d,",arr[i]);
+    // }
+    // printf("\n");
+    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][0], 1)));
+    // for(int i=0;i<16;i++){
+    //     printf("%d,",arr[i]);
+    // }
+    // printf("\n");
+    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][1], 0)));
+    // for(int i=0;i<16;i++){
+    //     printf("%d,",arr[i]);
+    // }
+    // printf("\n");
+    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][1], 1)));
+    // for(int i=0;i<16;i++){
+    //     printf("%d,",arr[i]);
+    // }
+    // printf("\n");
+
+    // if(layer_id == 0)
+    //     exit(0);
+
+
+    //---------------调试结束
     
     
     // 实现计算
-    omp_set_num_threads(8);
+    omp_set_num_threads(30);
     #pragma omp parallel for
     for (int i = 0; i < rows; ++i) {
 
@@ -221,40 +280,41 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         int q[8];
         int sum2 = 0;
         // 里面的数可以进一步循环展开
-        for(int j=0; j<columns;j+=4){
+        for(int j=0; j<columns;j+=2){
             __m256i w_low1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 0));
             auto val1 = _mm256_madd_epi16(x_low[j], w_low1);
-            //result1 = _mm256_add_epi32(result1, val1);
+            result1 = _mm256_add_epi32(result1, val1);
             __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
             auto val2 = _mm256_madd_epi16(x_high[j], w_high1);
-            //result1 = _mm256_add_epi32(result1, val2);
+            result1 = _mm256_add_epi32(result1, val2);
             __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
             auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
-            //result1 = _mm256_add_epi32(result1, val3);
+            result1 = _mm256_add_epi32(result1, val3);
             __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
             auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
-            //result1 = _mm256_add_epi32(result1, val4);
+            result1 = _mm256_add_epi32(result1, val4);
             
             __m256i w_low3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 0));
             auto val5 = _mm256_madd_epi16(x_low[j+2], w_low3);
-            //result1 = _mm256_add_epi32(result1, val5);
+            result1 = _mm256_add_epi32(result1, val5);
             __m256i w_high3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 1));
             auto val6 = _mm256_madd_epi16(x_high[j+2], w_high3);
-            //result1 = _mm256_add_epi32(result1, val6);
+            result1 = _mm256_add_epi32(result1, val6);
             __m256i w_low4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 0));
             auto val7 = _mm256_madd_epi16(x_low[j+3], w_low4);
-            //result1 = _mm256_add_epi32(result1, val7);
+            result1 = _mm256_add_epi32(result1, val7);
             __m256i w_high4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 1));
             auto val8 = _mm256_madd_epi16(x_high[j+3], w_high4);
-            
-            result1 = _mm256_add_epi32(result1, val1);
-            result1 = _mm256_add_epi32(result1, val2);
-            result1 = _mm256_add_epi32(result1, val3);
-            result1 = _mm256_add_epi32(result1, val4);
-            result1 = _mm256_add_epi32(result1, val5);
-            result1 = _mm256_add_epi32(result1, val6);
-            result1 = _mm256_add_epi32(result1, val7);
             result1 = _mm256_add_epi32(result1, val8);
+            
+            //result1 = _mm256_add_epi32(result1, val1);
+            //result1 = _mm256_add_epi32(result1, val2);
+            // result1 = _mm256_add_epi32(result1, val3);
+            // result1 = _mm256_add_epi32(result1, val4);
+            // result1 = _mm256_add_epi32(result1, val5);
+            // result1 = _mm256_add_epi32(result1, val6);
+            // result1 = _mm256_add_epi32(result1, val7);
+            // result1 = _mm256_add_epi32(result1, val8);
 
 
         }
@@ -271,8 +331,8 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
 
 // n*4096
 void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
-    omp_set_num_threads(30);
-    #pragma omp parallel for
+    // omp_set_num_threads(30);
+    // #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply(output[i],weight,input[i]);
     }
@@ -424,7 +484,7 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
 
 
     auto mm2 = std::chrono::high_resolution_clock::now();
-    //ShowTensor2D("q",q);
+    //
 
     //PrintTime(init,mm1,"matmul");
     //PrintTime(mm1,mm2,"matmul2");
@@ -451,7 +511,7 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     }
 
     auto scores = MultiheadQKV(q,g_kcache[layer_id],g_vcache[layer_id],start_pos,end_pos);
-    //ShowTensor2D("score1",scores[0]);
+
 
     for(int i=0;i<32;i++){
         if(q.size() > 1){
@@ -468,6 +528,7 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
         }
     }
     //ShowTensor2D("score2",scores[0]);
+    
     auto multihead = std::chrono::high_resolution_clock::now();
 
     tensor2d output1(input);
@@ -485,12 +546,14 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     auto output1_after = std::chrono::high_resolution_clock::now();
 
     //ShowTensor2D("o1",output1);
+    
     if(config_bit_length == 32){
         MatMul(out, output1, weights.wo[layer_id]);
     }else if(config_bit_length == 8){
         MatMul8bit(layer_id, out, output1, weights.wo8);
     }
-
+    // ShowTensor2D("out",out);
+    // exit(0);
     auto last_mul = std::chrono::high_resolution_clock::now();
     
     // if(input.size() == 1){
@@ -550,6 +613,7 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     }
 
     //ShowTensor2D("w2",out);
+    //exit(0);
     auto start5 = std::chrono::high_resolution_clock::now();
     
     // if(input.size() == 1){

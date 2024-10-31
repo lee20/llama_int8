@@ -70,6 +70,16 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
     for(int i=0;i<column_len;i++){
         s_coef[i] = pow(act[i] , alpha) / pow(column_max[i] , 1-alpha);
     }
+
+    // 调试信息
+    // for(int i=0;i<16;i++){
+    //     printf("act column %f,%f,%f\n",act[i],column_max[i],s_coef[i]);
+
+    // }
+    // exit(0);
+
+    // 结束调试
+
     // 量化权重
     for(int i=0;i<weight.size();i++){
         for(int j=0;j<weight[0].size();j++){
@@ -83,6 +93,26 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
         for(int j=0;j<weight[0].size();j++){
             temp_weight[j] = static_cast<int8_t>(weight[i][j]* s_coef[j]/delta);
         }
+        // //调试信息
+        // for(int j=0;j<64;j++){
+        //     printf("%f,",weight[i][j]);
+        // }
+        // printf("\n");
+        // for(int j=0;j<64;j++){
+        //     printf("%d,",temp_weight[j]);
+        // }
+        // printf("\n");
+        // for(int j=0;j<64;j++){
+        //     printf("%f,",s_coef[j]);
+        // }
+        // printf("\n");
+        // for(int j=0;j<64;j++){
+        //     printf("%f,",delta);
+        // }
+        // printf("\n");
+        // exit(0);
+
+        //输出
         for(int j=0;j<weight[0].size();j+=32){
             weight8[i][j/32] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&temp_weight[j]));
         }
@@ -99,11 +129,11 @@ void SaveWeight1D(const std::string filename, const tensor1d &vec){
     }
 
     // 获取向量的大小并写入文件
-    size_t size = vec.size();
-    outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
+    //size_t size = vec.size();
+    //outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
 
     // 写入浮点数数据
-    outFile.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(float));
+    outFile.write(reinterpret_cast<const char*>(vec.data()), vec.size() * sizeof(float));
 
     outFile.close();
     if (!outFile.good()) {
@@ -121,10 +151,10 @@ void SaveWeight2D8(const std::string filename, const tensor8b2d &vec){
 
     // 写入二维向量的行数和列数
     size_t rows = vec.size();
-    outFile.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+    //outFile.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
     for (const auto& row : vec) {
         size_t cols = row.size();
-        outFile.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+        //outFile.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
         
         for (const auto& m256i_value : row) {
             // 将每个 __m256i 转换为 int8_t 数组
