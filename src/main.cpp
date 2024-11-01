@@ -305,7 +305,7 @@ int main(){
     // decode
     int start_pos = embedded.size();
     std::vector<int> result;
-    while(1){
+    while(next_token != 2){
         
         result.push_back(next_token);
         std::string result_str = Detokenizer(result);        
@@ -316,7 +316,7 @@ int main(){
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         
-        //std::cout<<result_str<<std::endl;
+        std::cout<<result_str<<std::endl;
         PrintTime(start,end,"Decode "+std::to_string(next_token));
     }
 
