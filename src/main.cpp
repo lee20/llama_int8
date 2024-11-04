@@ -98,7 +98,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 32;
+    config.bit_length = 8;
 }
 
 
@@ -305,6 +305,9 @@ int main(){
     // decode
     int start_pos = embedded.size();
     std::vector<int> result;
+
+    auto start0 = std::chrono::high_resolution_clock::now();
+    int count = 0;
     while(next_token != 2){
         
         result.push_back(next_token);
@@ -315,9 +318,10 @@ int main(){
         next_token = Transformer(input_vec,transformer_weights,llama2_config,start_pos,start_pos+1);
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
-        
-        std::cout<<result_str<<std::endl;
-        PrintTime(start,end,"Decode "+std::to_string(next_token));
+        count += 1;
+        if(count == 10) PrintTime(start0,end,"timecost");
+        //std::cout<<result_str<<std::endl;
+        //PrintTime(start,end,"Decode "+std::to_string(next_token));
     }
 
 

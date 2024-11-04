@@ -224,101 +224,56 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         x_low[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 0));
         x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
     }
-
-    //--------------- 这是调试信息
-    // printf("deltax = %f, deltaw = %f\n x int8 value = ", deltax, delatw);
-    // int16_t arr[16];
-    // // 将 __m256i 中的数据存储到普通的 int16 数组中
-    // _mm256_storeu_si256((__m256i*)arr, x_low[0]);
-    // for(int i=0;i<16;i++){
-    //     printf("%d,",arr[i]);
-    // }
-    // printf("\n x scalex  = ");
-    // for(int i=0;i<64;i++){
-    //     printf("%d,%f,",i,weights.scale[layer_id][i]);
-    // }
-    // printf("\n x float value  = ");
-    // for(int i=16;i<32;i++){
-    //     printf("%f,",x[i]);
-    // }
-
-    // printf("\n w value  = ");
-    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][0], 0)));
-    // for(int i=0;i<16;i++){
-    //     printf("%d,",arr[i]);
-    // }
-    // printf("\n");
-    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][0], 1)));
-    // for(int i=0;i<16;i++){
-    //     printf("%d,",arr[i]);
-    // }
-    // printf("\n");
-    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][1], 0)));
-    // for(int i=0;i<16;i++){
-    //     printf("%d,",arr[i]);
-    // }
-    // printf("\n");
-    // _mm256_storeu_si256((__m256i*)arr,_mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][0][1], 1)));
-    // for(int i=0;i<16;i++){
-    //     printf("%d,",arr[i]);
-    // }
-    // printf("\n");
-
-    // if(layer_id == 0)
-    //     exit(0);
-
-
-    //---------------调试结束
     
     
-    // 实现计算
-    omp_set_num_threads(30);
-    #pragma omp parallel for
+    // 实现计算 不设定并行数效率更高些 omp_set_num_threads(30);
+    #pragma omp parallel for schedule(static)
     for (int i = 0; i < rows; ++i) {
 
         __m256i result1 = _mm256_setzero_si256();
+        __m256i result2 = _mm256_setzero_si256();
+        __m256i result3 = _mm256_setzero_si256();
+        __m256i result4 = _mm256_setzero_si256();
         int q[8];
         int sum2 = 0;
         // 里面的数可以进一步循环展开
-        for(int j=0; j<columns;j+=2){
+        for(int j=0; j<columns;j+=4){
+
             __m256i w_low1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 0));
             auto val1 = _mm256_madd_epi16(x_low[j], w_low1);
             result1 = _mm256_add_epi32(result1, val1);
             __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
             auto val2 = _mm256_madd_epi16(x_high[j], w_high1);
-            result1 = _mm256_add_epi32(result1, val2);
+            result2 = _mm256_add_epi32(result2, val2);
+
+  
             __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
             auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
-            result1 = _mm256_add_epi32(result1, val3);
+            result3 = _mm256_add_epi32(result3, val3);
             __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
             auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
-            result1 = _mm256_add_epi32(result1, val4);
+            result4 = _mm256_add_epi32(result4, val4);
             
+
             __m256i w_low3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 0));
             auto val5 = _mm256_madd_epi16(x_low[j+2], w_low3);
             result1 = _mm256_add_epi32(result1, val5);
             __m256i w_high3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 1));
             auto val6 = _mm256_madd_epi16(x_high[j+2], w_high3);
-            result1 = _mm256_add_epi32(result1, val6);
+            result2 = _mm256_add_epi32(result2, val6);
+
+
             __m256i w_low4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 0));
             auto val7 = _mm256_madd_epi16(x_low[j+3], w_low4);
-            result1 = _mm256_add_epi32(result1, val7);
+            result3 = _mm256_add_epi32(result3, val7);
             __m256i w_high4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 1));
             auto val8 = _mm256_madd_epi16(x_high[j+3], w_high4);
-            result1 = _mm256_add_epi32(result1, val8);
-            
-            //result1 = _mm256_add_epi32(result1, val1);
-            //result1 = _mm256_add_epi32(result1, val2);
-            // result1 = _mm256_add_epi32(result1, val3);
-            // result1 = _mm256_add_epi32(result1, val4);
-            // result1 = _mm256_add_epi32(result1, val5);
-            // result1 = _mm256_add_epi32(result1, val6);
-            // result1 = _mm256_add_epi32(result1, val7);
-            // result1 = _mm256_add_epi32(result1, val8);
-
-
+            result4 = _mm256_add_epi32(result4, val8);
         }
-        _mm256_store_si256((__m256i*)q, result1);
+        __m256i result0 = _mm256_add_epi32(result1, result2);
+        __m256i result00 = _mm256_add_epi32(result4, result3);
+        __m256i result000 = _mm256_add_epi32(result0, result00);
+        _mm256_store_si256((__m256i*)q, result000);
         sum2 = q[0] + q[1] + q[2] + q[3] + q[4] + q[5] + q[6] + q[7];
 
         results[i] = deltax*delatw*sum2;
@@ -340,8 +295,6 @@ void MatMul(tensor2d &output, const tensor2d &input,const tensor2d & weight){
 
 // n*4096
 void MatMul8bit(int layerid, tensor2d &output, const tensor2d &input,const Int8Weight & weights){
-    // omp_set_num_threads(8);
-    // #pragma omp parallel for
     for(int i=0;i<input.size();i++){
         avx_matrix_vector_multiply8b(layerid,output[i],weights,input[i]);
     }
