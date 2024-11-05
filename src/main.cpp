@@ -98,7 +98,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 8;
+    config.bit_length = 32;
 }
 
 
@@ -292,7 +292,7 @@ int main(){
     // if(llama2_config.bit_length == 32) //这个表示初始量化
     //     change8bit(transformer_weights);
     auto end = std::chrono::high_resolution_clock::now();
-    PrintTime(start,end,"Load 8bit weight");
+    PrintTime(start,end,"Load weight");
 
 
     

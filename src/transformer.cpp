@@ -120,35 +120,43 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
     // }
     // printf("\n");
     // exit(0);
-    omp_set_num_threads(30);
+    //omp_set_num_threads(30);
     #pragma omp parallel for
-
     for (int i = 0; i < rows; ++i) {
-        __m256 sum = _mm256_setzero_ps();  // 初始化累加器
+        __m256 sum1 = _mm256_setzero_ps();  // 初始化累加器
+        __m256 sum2 = _mm256_setzero_ps();  // 初始化累加器
+        __m256 sum3 = _mm256_setzero_ps();  // 初始化累加器
+        __m256 sum4 = _mm256_setzero_ps();  // 初始化累加器
+        
 
         // 按 8 元素一组进行计算
-        int j = 0;
+        
 
-        for (; j <length; j += 8) {
+        for (int j = 0; j <length; j += 8) {
             
             __m256 vecA1 = _mm256_loadu_ps(&A[i][j << 3]);         // 加载第一个 256 位块
+            sum1 = _mm256_fmadd_ps(vecA1, vecX[j], sum1);           // 执行第一个块的乘加操作
+
             __m256 vecA2 = _mm256_loadu_ps(&A[i][(j + 1) << 3]);   // 加载第二个 256 位块
+            sum2 = _mm256_fmadd_ps(vecA2, vecX[j + 1], sum2);       // 执行第二个块的乘加操作
+
             __m256 vecA3 = _mm256_loadu_ps(&A[i][(j + 2) << 3]);
+            sum3 = _mm256_fmadd_ps(vecA3, vecX[j + 2], sum3);
+
             __m256 vecA4 = _mm256_loadu_ps(&A[i][(j + 3) << 3]);
+            sum4 = _mm256_fmadd_ps(vecA4, vecX[j + 3], sum4);
+
             __m256 vecA5 = _mm256_loadu_ps(&A[i][(j + 4) << 3]);
+            sum1 = _mm256_fmadd_ps(vecA5, vecX[j + 4], sum1);
+
             __m256 vecA6 = _mm256_loadu_ps(&A[i][(j + 5) << 3]);
+            sum2 = _mm256_fmadd_ps(vecA6, vecX[j + 5], sum2);
+
             __m256 vecA7 = _mm256_loadu_ps(&A[i][(j + 6) << 3]);
+            sum3 = _mm256_fmadd_ps(vecA7, vecX[j + 6], sum3);
+
             __m256 vecA8 = _mm256_loadu_ps(&A[i][(j + 7) << 3]);
-
-            sum = _mm256_fmadd_ps(vecA1, vecX[j], sum);           // 执行第一个块的乘加操作
-            sum = _mm256_fmadd_ps(vecA2, vecX[j + 1], sum);       // 执行第二个块的乘加操作
-            sum = _mm256_fmadd_ps(vecA3, vecX[j + 2], sum);
-            sum = _mm256_fmadd_ps(vecA4, vecX[j + 3], sum);
-
-            sum = _mm256_fmadd_ps(vecA5, vecX[j + 4], sum);
-            sum = _mm256_fmadd_ps(vecA6, vecX[j + 5], sum);
-            sum = _mm256_fmadd_ps(vecA7, vecX[j + 6], sum);
-            sum = _mm256_fmadd_ps(vecA8, vecX[j + 7], sum);
+            sum4 = _mm256_fmadd_ps(vecA8, vecX[j + 7], sum4);
 
             // __builtin_prefetch(&A[i][(j + 8 + 8) << 3], 0, 1);
             // __builtin_prefetch(&A[i][(j + 8 + 10) << 3], 0, 1);
@@ -165,8 +173,10 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
         // }
 
         // 将 SIMD 寄存器的值存储到数组中
-        
-        _mm256_storeu_ps(result, sum);
+        __m256 result0 = _mm256_add_ps(sum1,sum2);
+        result0 = _mm256_add_ps(result0, sum3);
+        result0 = _mm256_add_ps(result0, sum4);
+        _mm256_storeu_ps(result, result0);
         // 累加 SIMD 的结果和尾部的部分结果
         results[i] = result[0] + result[1] + result[2] + result[3] +  result[4] + result[5] + result[6] + result[7];
     }
@@ -218,12 +228,12 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
     float delatw = weights.delta[layer_id];
 
     // 这部分也记录时间
-    tensor8b1d x_low(columns,_mm256_setzero_si256());
-    tensor8b1d x_high(columns,_mm256_setzero_si256());
-    for(int j=0; j<columns;j++){
-        x_low[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 0));
-        x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
-    }
+    // tensor8b1d x_low(columns,_mm256_setzero_si256());
+    // tensor8b1d x_high(columns,_mm256_setzero_si256());
+    // for(int j=0; j<columns;j++){
+    //     x_low[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 0));
+    //     x_high[j] = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(input8b[j], 1));
+    // }
     
     
     // 实现计算 不设定并行数效率更高些 omp_set_num_threads(30);
@@ -236,39 +246,53 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         __m256i result4 = _mm256_setzero_si256();
         int q[8];
         int sum2 = 0;
+        const __m256i ones = _mm256_set1_epi16(1);
         // 里面的数可以进一步循环展开
         for(int j=0; j<columns;j+=4){
+            __m256i x = weights.weight8[layer_id][i][j];
+            __m256i dot = _mm256_maddubs_epi16(_mm256_sign_epi8(x, x), _mm256_sign_epi8(input8b[j], x));
+            __m256i result = _mm256_madd_epi16(dot, ones);
+            result1 = _mm256_add_epi32(result, result1);
 
-            __m256i w_low1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 0));
-            auto val1 = _mm256_madd_epi16(x_low[j], w_low1);
-            result1 = _mm256_add_epi32(result1, val1);
-            __m256i w_high1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j], 1));
-            auto val2 = _mm256_madd_epi16(x_high[j], w_high1);
-            result2 = _mm256_add_epi32(result2, val2);
+            __m256i x1 = weights.weight8[layer_id][i][j+1];
+            __m256i dot1 = _mm256_maddubs_epi16(_mm256_sign_epi8(x1, x1), _mm256_sign_epi8(input8b[j+1], x1));
+            __m256i result01 = _mm256_madd_epi16(dot1, ones);
+            result2 = _mm256_add_epi32(result01, result2);
+
+
+            __m256i x2 = weights.weight8[layer_id][i][j+2];
+            __m256i dot2 = _mm256_maddubs_epi16(_mm256_sign_epi8(x2, x2), _mm256_sign_epi8(input8b[j+2], x2));
+            __m256i result02 = _mm256_madd_epi16(dot2, ones);
+            result3 = _mm256_add_epi32(result02, result3);
+
+            __m256i x3 = weights.weight8[layer_id][i][j+3];
+            __m256i dot3 = _mm256_maddubs_epi16(_mm256_sign_epi8(x3, x3), _mm256_sign_epi8(input8b[j+3], x3));
+            __m256i result03 = _mm256_madd_epi16(dot3, ones);
+            result4 = _mm256_add_epi32(result03, result4);
 
   
-            __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
-            auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
-            result3 = _mm256_add_epi32(result3, val3);
-            __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
-            auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
-            result4 = _mm256_add_epi32(result4, val4);
+            // __m256i w_low2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 0));
+            // auto val3 = _mm256_madd_epi16(x_low[j+1], w_low2);
+            // result3 = _mm256_add_epi32(result3, val3);
+            // __m256i w_high2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+1], 1));
+            // auto val4 = _mm256_madd_epi16(x_high[j+1], w_high2);
+            // result4 = _mm256_add_epi32(result4, val4);
             
 
-            __m256i w_low3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 0));
-            auto val5 = _mm256_madd_epi16(x_low[j+2], w_low3);
-            result1 = _mm256_add_epi32(result1, val5);
-            __m256i w_high3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 1));
-            auto val6 = _mm256_madd_epi16(x_high[j+2], w_high3);
-            result2 = _mm256_add_epi32(result2, val6);
+            // __m256i w_low3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 0));
+            // auto val5 = _mm256_madd_epi16(x_low[j+2], w_low3);
+            // result1 = _mm256_add_epi32(result1, val5);
+            // __m256i w_high3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+2], 1));
+            // auto val6 = _mm256_madd_epi16(x_high[j+2], w_high3);
+            // result2 = _mm256_add_epi32(result2, val6);
 
 
-            __m256i w_low4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 0));
-            auto val7 = _mm256_madd_epi16(x_low[j+3], w_low4);
-            result3 = _mm256_add_epi32(result3, val7);
-            __m256i w_high4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 1));
-            auto val8 = _mm256_madd_epi16(x_high[j+3], w_high4);
-            result4 = _mm256_add_epi32(result4, val8);
+            // __m256i w_low4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 0));
+            // auto val7 = _mm256_madd_epi16(x_low[j+3], w_low4);
+            // result3 = _mm256_add_epi32(result3, val7);
+            // __m256i w_high4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(weights.weight8[layer_id][i][j+3], 1));
+            // auto val8 = _mm256_madd_epi16(x_high[j+3], w_high4);
+            // result4 = _mm256_add_epi32(result4, val8);
         }
         __m256i result0 = _mm256_add_epi32(result1, result2);
         __m256i result00 = _mm256_add_epi32(result4, result3);
