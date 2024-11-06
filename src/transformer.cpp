@@ -24,7 +24,7 @@ void PrintTime(std::chrono::time_point<std::chrono::high_resolution_clock> start
 
 void ShowTensor2D(std::string variable_name, tensor2d mat){
     int print_length = (mat.size() < mat[0].size())?mat.size() : mat[0].size();
-    std::cout<<variable_name<<" tensor[0][0:20] = {";
+    std::cout<<variable_name<<" tensor[15][1000:1020] = {";
     for(int i=1000;i<1020;i++){
         std::cout<< mat[15][i] << ",";
     }
@@ -121,7 +121,7 @@ void avx_matrix_vector_multiply(tensor1d &results, const tensor2d &A, const tens
     // printf("\n");
     // exit(0);
     //omp_set_num_threads(30);
-    #pragma omp parallel for
+    //#pragma omp parallel for
     for (int i = 0; i < rows; ++i) {
         __m256 sum1 = _mm256_setzero_ps();  // 初始化累加器
         __m256 sum2 = _mm256_setzero_ps();  // 初始化累加器
@@ -214,6 +214,21 @@ float QuantizeX(const tensor1d & input, const tensor1d &input_scale, tensor8b1d 
 
 }
 
+void print_m256i_int8(__m256i vec) {
+    // 创建一个 int8_t 数组来存储向量内容
+    alignas(32) int8_t values[32];
+    
+    // 将 __m256i 数据存储到 int8_t 数组中
+    _mm256_store_si256((__m256i*)values, vec);
+
+    // 打印数组中的每个 int8 元素
+    std::cout << "[ ";
+    for (int i = 0; i < 32; ++i) {
+        std::cout << static_cast<int>(values[i]) << " ";
+    }
+    std::cout << "]" << std::endl;
+}
+
 
 void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Weight &weights, const tensor1d &x) {
     // 量化X
@@ -224,8 +239,18 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
 
     // printf("%d,%d\n",rows,columns);exit(0);
     tensor8b1d input8b(columns,_mm256_setzero_si256());
+    // for(int i=0;i<x.size();i++) printf("%f,",x[i]);
     float deltax = QuantizeX(x, weights.scale[layer_id],input8b);
     float delatw = weights.delta[layer_id];
+
+    // for(int i=0; i<columns; i++){
+    //     //print_m256i_int8(input8b[i]);
+    //     print_m256i_int8(weights.weight8[layer_id][200][i]);
+    // }
+    // for(int i=0;i<weights.scale[layer_id].size();i++){
+    //     printf("%f,",weights.scale[layer_id][i]);
+    // }
+
 
     // 这部分也记录时间
     // tensor8b1d x_low(columns,_mm256_setzero_si256());
@@ -237,7 +262,7 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
     
     
     // 实现计算 不设定并行数效率更高些 omp_set_num_threads(30);
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for //schedule(static)
     for (int i = 0; i < rows; ++i) {
 
         __m256i result1 = _mm256_setzero_si256();
@@ -299,9 +324,11 @@ void avx_matrix_vector_multiply8b(int layer_id, tensor1d &results, const Int8Wei
         __m256i result000 = _mm256_add_epi32(result0, result00);
         _mm256_store_si256((__m256i*)q, result000);
         sum2 = q[0] + q[1] + q[2] + q[3] + q[4] + q[5] + q[6] + q[7];
+        //printf("%d,",sum2);
 
         results[i] = deltax*delatw*sum2;
     }
+    //printf("\n\n\n\n");
 
 }
 
@@ -459,7 +486,6 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     }
 
 
-
     auto mm2 = std::chrono::high_resolution_clock::now();
     //
 
@@ -529,8 +555,7 @@ tensor2d Attention(int layer_id, const tensor2d & input,const TransformerWeights
     }else if(config_bit_length == 8){
         MatMul8bit(layer_id, out, output1, weights.wo8);
     }
-    // ShowTensor2D("out",out);
-    // exit(0);
+
     auto last_mul = std::chrono::high_resolution_clock::now();
     
     // if(input.size() == 1){
@@ -573,6 +598,7 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
 
     //ShowTensor2D("w3_result",w3_result);
     //ShowTensor2D("w1_result",w1_result);
+
     auto start3 = std::chrono::high_resolution_clock::now();
     
     for(int i=0;i<w1_result.size();i++){
@@ -581,6 +607,7 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     }
     
     auto result0 = w1_result * w3_result;
+    //ShowTensor2D("result0",result0);
     auto start4 = std::chrono::high_resolution_clock::now();
 
     if(config_bit_length == 32){
@@ -588,9 +615,10 @@ tensor2d Feedforward(int layer_id, tensor2d input,const TransformerWeights &weig
     }else if(config_bit_length == 8){
         MatMul8bit(layer_id, out, result0, weights.w28);
     }
-
-    //ShowTensor2D("w2",out);
-    //exit(0);
+    
+    // ShowTensor2D("w2",out);
+    // if(layer_id == 1)
+    //     exit(0);
     auto start5 = std::chrono::high_resolution_clock::now();
     
     // if(input.size() == 1){

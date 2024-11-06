@@ -98,7 +98,7 @@ void InitConfig(Config &config){
     config.seq_len = 4096;
     config.temprature = 0.5;
     config.top_p = 0.9;
-    config.bit_length = 32;
+    config.bit_length = 8;
 }
 
 
@@ -273,6 +273,8 @@ int main(){
     // 输入数据
     std::string input_string = "Tell a story about Greece mythology, with an element of jokes, an element of Aphrodite, the goddess of love, and take place on the island of Cyprus.";
     std::string embedding_filepath = "/home/liyanjun/llama/llama2/llama2chatweightfp32/tok_embeddings.weight.bin";
+    //std::string input_string = "tell a short joke";
+    
 
     // 加载数据和配置
     auto start = std::chrono::high_resolution_clock::now();
@@ -289,8 +291,8 @@ int main(){
     }
     auto ids = TokenizerGenerator(input_string);
     auto embedded = Embed(ids, transformer_weights.token_embedding_table);
-    // if(llama2_config.bit_length == 32) //这个表示初始量化
-    //     change8bit(transformer_weights);
+    if(llama2_config.bit_length == 32) //这个表示初始量化
+        change8bit(transformer_weights);
     auto end = std::chrono::high_resolution_clock::now();
     PrintTime(start,end,"Load weight");
 
@@ -319,8 +321,8 @@ int main(){
         end = std::chrono::high_resolution_clock::now();
         start_pos += 1;
         count += 1;
-        if(count == 10) PrintTime(start0,end,"timecost");
-        //std::cout<<result_str<<std::endl;
+        //if(count == 10) PrintTime(start0,end,"timecost");
+        std::cout<<result_str<<std::endl;
         //PrintTime(start,end,"Decode "+std::to_string(next_token));
     }
 

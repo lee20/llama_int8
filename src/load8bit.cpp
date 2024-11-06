@@ -54,7 +54,7 @@ void ReadActInfo(int index, tensor1d &vec, std::string name){
 
 float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, tensor1d &s_coef)
 {
-    float alpha = 0.5;
+    float alpha = 0.4;
     int column_len = act.size();
     std::vector<float> column_max(column_len,0);
     float quant_max = 0;
@@ -69,6 +69,7 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
     // 除出系数
     for(int i=0;i<column_len;i++){
         s_coef[i] = pow(act[i] , alpha) / pow(column_max[i] , 1-alpha);
+        //if(s_coef[i] > 5) printf("scoef %f,%f,%f,\n",s_coef[i],act[i], column_max[i]);
     }
 
     // 调试信息
@@ -83,9 +84,11 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
     // 量化权重
     for(int i=0;i<weight.size();i++){
         for(int j=0;j<weight[0].size();j++){
+            //if(abs(weight[i][j]* s_coef[j]) > 3) printf("%f,%f,\n",weight[i][j], s_coef[j]);
             quant_max = (quant_max > abs(weight[i][j]* s_coef[j]))? quant_max : weight[i][j]* s_coef[j];
         }
     }
+    //printf("%f\n",quant_max);
     // 保存量化的权重和scale
     delta = quant_max / 127.0;
     std::vector<int8_t> temp_weight(column_len,0);
@@ -110,7 +113,7 @@ float ChangeWeight(const tensor2d &weight, tensor8b2d &weight8, tensor1d &act, t
         //     printf("%f,",delta);
         // }
         // printf("\n");
-        // exit(0);
+        //exit(0);
 
         //输出
         for(int j=0;j<weight[0].size();j+=32){
@@ -220,7 +223,11 @@ void change8bit(TransformerWeights &weights)
         weights.w38.delta[i] = ChangeWeight(weights.w3[i],weights.w38.weight8[i],actinfo,weights.w38.scale[i]);
 
         ReadActInfo(i,actinfo2,"stat2");
-        weights.w28.delta[i] = ChangeWeight(weights.w2[i],weights.w28.weight8[i],actinfo2,weights.w28.scale[i]);
+        // if(i == 1){
+        //     std::cout<<"change weight1" << std::endl;
+             weights.w28.delta[i] = ChangeWeight(weights.w2[i],weights.w28.weight8[i],actinfo2,weights.w28.scale[i]);
+        //     exit(0);
+        // }
     }
 
     for (int i = 0; i < 32; i++)
